@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <title>文档标题</title>
+    <link rel="canonical" href="/canonical-post" />
+    <meta property="og:title" content="OpenGraph 标题" />
+    <meta property="og:url" content="https://example.com/open-graph-post" />
+    <meta property="og:site_name" content="示例站点" />
+    <meta property="article:published_time" content="2026-09-01T08:00:00.000Z" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Article",
+        "headline": "JSON-LD 标题",
+        "author": { "@type": "Person", "name": "张三" },
+        "datePublished": "2026-09-01T08:00:00.000Z"
+      }
+    </script>
+  </head>
+  <body>
+    <nav>不应被提取的导航</nav>
+    <article>
+      <h1>JSON-LD 标题</h1>
+      <p>这是第一段正式内容，用于验证已渲染正文能被转换为稳定的 Markdown，而不是采集页面的脚本、导航或其他交互控件。</p>
+      <p>第二段继续解释系统如何在浏览器当前展示的页面中提取文本、链接、代码和图片，并保留阅读上下文。</p>
+      <p><a href="/docs">相关链接</a> 可以帮助读者了解实现细节。</p>
+      <figure><img data-src="https://cdn.example.com/diagram.png" alt="架构图" /></figure>
+      <img src="data:image/png;base64,abc" alt="内嵌占位图" />
+      <pre><code class="language-ts">const capture = await extract();</code></pre>
+      <table>
+        <thead><tr><th>阶段</th><th>结果</th></tr></thead>
+        <tbody><tr><td>提取</td><td>Markdown</td></tr></tbody>
+      </table>
+      <p>最后一段补充更多可读内容，以确保测试夹具能够通过 Readability 的最小正文判定，并且保持接近真实技术文章的结构。</p>
+    </article>
+  </body>
+</html>

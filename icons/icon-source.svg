@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">Open Context Clipper</title>
+  <desc id="desc">深蓝色圆角方形内是一张白色文章页，右上角有青蓝色采集火花。</desc>
+  <defs>
+    <linearGradient id="background" x1="18" y1="14" x2="112" y2="118" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#173E7A"/>
+      <stop offset="1" stop-color="#2F6CC4"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="30" fill="url(#background)"/>
+  <rect x="5.5" y="5.5" width="117" height="117" rx="28.5" fill="none" stroke="#FFFFFF" stroke-opacity=".16" stroke-width="3"/>
+  <rect x="31" y="23" width="62" height="82" rx="11" fill="#FFFFFF"/>
+  <path d="M75 23h7a11 11 0 0 1 11 11v8L75 23Z" fill="#DCEBFF"/>
+  <rect x="43" y="50" width="38" height="6" rx="3" fill="#285590"/>
+  <rect x="43" y="65" width="32" height="6" rx="3" fill="#86A4CD"/>
+  <rect x="43" y="80" width="25" height="6" rx="3" fill="#86A4CD"/>
+  <path d="M97 18c1.5 8.7 5.3 12.5 14 14-8.7 1.5-12.5 5.3-14 14-1.5-8.7-5.3-12.5-14-14 8.7-1.5 12.5-5.3 14-14Z" fill="#5EEAD4"/>
+  <path d="M108 43c.7 4 2.5 5.8 6.5 6.5-4 .7-5.8 2.5-6.5 6.5-.7-4-2.5-5.8-6.5-6.5 4-.7 5.8-2.5 6.5-6.5Z" fill="#A7F3D0"/>
+</svg>
