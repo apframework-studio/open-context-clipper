@@ -2,6 +2,8 @@
 
 本仓库是 Open Context Clipper 的独立源码仓库，属于 ApFramework Studio 的知识工具体系。
 
+继续工作前先阅读 [docs/HANDOFF.md](docs/HANDOFF.md)。`docs/history/` 是旧仓库迁出前的设计与实施记录，其中的 `apps/chrome-extension/` 路径和旧产品名称不再是当前仓库约束。
+
 ## 产品边界
 
 - 插件只在用户主动操作时读取当前标签页已渲染的内容。
@@ -15,3 +17,4 @@
 - `dist/` 和 `node_modules/` 是生成物，不提交到 Git。
 - 修改后运行 `npm test`、`npm run typecheck` 和 `npm run build`。
 - 只有真实 Chrome 手工验证才能确认扩展加载与页面交互；自动化测试不能替代这一步。
+- 旧版扩展队列与新安装路径之间没有自动数据迁移。涉及扩展 ID、IndexedDB 或卸载流程时，先确认用户已导出需要保留的旧记录。
