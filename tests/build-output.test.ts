@@ -39,6 +39,7 @@ describe("extension build", () => {
     const queueHtml = readFileSync(resolve(dist, "queue.html"), "utf8");
 
     expect(queueHtml).toContain('rel="stylesheet" href="/queue.css"');
+    expect(queueHtml).toContain("<title>Open Context Clipper · 采集队列</title>");
   });
 
   it("emits branded extension icons at every declared Chrome size", () => {

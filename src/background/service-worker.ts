@@ -15,7 +15,7 @@ export interface ChromePort {
 
 export type CaptureRepositoryPort = Pick<
   CaptureRepository,
-  "saveConfirmed" | "list" | "updateNote" | "delete" | "promoteDuplicate" | "countByStatus"
+  "saveConfirmed" | "list" | "updateNote" | "delete" | "promoteDuplicate" | "markCompleted" | "countByStatus"
 >;
 
 type BackgroundDependencies = {
@@ -77,6 +77,8 @@ function isExtensionRequest(value: unknown): value is ExtensionRequest {
     case "DELETE_CAPTURE":
     case "PROMOTE_DUPLICATE":
       return typeof request.id === "string";
+    case "MARK_CAPTURES_COMPLETE":
+      return Array.isArray(request.ids) && request.ids.length > 0 && request.ids.every((id) => typeof id === "string" && id.length > 0);
     case "OPEN_SOURCE":
       return typeof request.url === "string";
     default:
@@ -142,6 +144,12 @@ export function createBackgroundController(deps: BackgroundDependencies) {
             if (!record) return responseError("CAPTURE_NOT_FOUND", "The capture record was not found.");
             await refreshQueuedBadge(deps);
             return { ok: true, type: "RECORD", record };
+          }
+          case "MARK_CAPTURES_COMPLETE": {
+            if (request.ids.length === 0) return responseError("EMPTY_SELECTION", "No captures were selected for export.");
+            await deps.repository.markCompleted(request.ids, new Date().toISOString());
+            await refreshQueuedBadge(deps);
+            return { ok: true, type: "CAPTURES", records: await deps.repository.list() };
           }
           case "OPEN_QUEUE":
             await deps.chromePort.openExtensionPage("queue.html");

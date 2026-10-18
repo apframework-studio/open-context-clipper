@@ -1,4 +1,5 @@
 import { JSDOM } from "jsdom";
+import { strFromU8, unzipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import { createQueueController, type QueueMessageClient } from "../../src/queue/main";
 import type { ExtensionRequest, ExtensionResponse } from "../../src/shared/messages";
@@ -38,6 +39,7 @@ const duplicate: CaptureRecord = {
 class FakeMessageClient implements QueueMessageClient {
   readonly requests: ExtensionRequest[] = [];
   records = [queued, duplicate];
+  failCompletion = false;
 
   async send(request: ExtensionRequest): Promise<ExtensionResponse> {
     this.requests.push(request);
@@ -58,6 +60,12 @@ class FakeMessageClient implements QueueMessageClient {
       }
       case "DELETE_CAPTURE":
         this.records = this.records.filter((record) => record.id !== request.id);
+        return { ok: true, type: "CAPTURES", records: this.records };
+      case "MARK_CAPTURES_COMPLETE":
+        if (this.failCompletion) return { ok: false, code: "SAVE_FAILED", message: "IndexedDB unavailable" };
+        this.records = this.records.map((record) => request.ids.includes(record.id)
+          ? { ...record, completedAt: record.completedAt ?? "2026-10-18T10:00:00.000Z" }
+          : record);
         return { ok: true, type: "CAPTURES", records: this.records };
       case "OPEN_SOURCE":
         return { ok: true, type: "OPENED" };
@@ -88,20 +96,21 @@ describe("local queue controller", () => {
     expect(root.textContent).not.toContain("重新采集");
   });
 
-  it("renders a queue overview and clear status pills before the capture cards", async () => {
+  it("renders the inbox as a compact list with visible export controls and a detail panel", async () => {
     const root = createRoot();
     const controller = createQueueController({ root, messageClient: new FakeMessageClient(), download: () => undefined });
 
     await controller.load();
 
     expect(root.querySelector(".queue-hero h1")?.textContent).toBe("收件箱");
-    expect(root.querySelector(".queue-summary")?.textContent).toContain("全部记录");
-    expect(root.querySelector(".queue-summary")?.textContent).toContain("待同步");
+    expect(root.querySelector(".queue-toolbar")?.textContent).toContain("导出全部 ZIP");
+    expect(root.querySelector(".queue-selection-bar")?.textContent).toContain("导出所选 ZIP");
     expect(root.querySelectorAll(".status-pill")).toHaveLength(2);
     expect(root.querySelector(".capture-row .capture-main")).not.toBeNull();
+    expect(root.querySelector(".queue-detail")?.textContent).toContain("待同步文章");
   });
 
-  it("renders the chosen workspace console with a focused next capture", async () => {
+  it("uses inbox and completed as the only primary navigation views", async () => {
     const root = createRoot();
     const controller = createQueueController({ root, messageClient: new FakeMessageClient(), download: () => undefined });
 
@@ -109,32 +118,24 @@ describe("local queue controller", () => {
 
     expect(root.querySelector(".queue-layout")).not.toBeNull();
     expect(root.querySelector(".queue-rail .queue-brand")?.textContent).toBe("O");
-    expect(root.querySelector(".queue-focus")?.textContent).toContain("下一条待整理");
-    expect(root.querySelector(".queue-focus")?.textContent).toContain("待同步文章");
-    expect(root.querySelector(".capture-index")?.textContent).toBe("01");
-    const duplicateFilter = [...root.querySelectorAll<HTMLButtonElement>(".queue-nav-item")]
-      .find((button) => button.textContent?.includes("重复候选"));
-    duplicateFilter!.click();
-    expect(root.textContent).toContain("重复候选文章");
-    expect(root.textContent).not.toContain("待同步文章");
+    expect([...root.querySelectorAll(".queue-nav-item")].map((button) => button.textContent)).toEqual([
+      "收件箱2", "已完成0",
+    ]);
+    expect(root.querySelector(".queue-focus")).toBeNull();
   });
 
-  it("keeps note editing and destructive actions in compact disclosures", async () => {
+  it("keeps notes and deletion in the detail panel rather than every list row or a clipped menu", async () => {
     const root = createRoot();
     const controller = createQueueController({ root, messageClient: new FakeMessageClient(), download: () => undefined });
 
     await controller.load();
 
-    expect(root.querySelector(".queue-kicker")?.textContent).toBe("本地优先 · 离线整理");
-    const noteEditor = root.querySelector<HTMLDetailsElement>(".capture-note-editor");
-    expect(noteEditor?.open).toBe(false);
-    expect(noteEditor?.querySelector("summary")?.textContent).toBe("添加或编辑备注");
-    expect(noteEditor?.querySelector("textarea")).not.toBeNull();
-    const moreActions = root.querySelector<HTMLDetailsElement>(".capture-more-actions");
-    expect(moreActions?.open).toBe(false);
-    expect(moreActions?.textContent).toContain("导出 Markdown");
-    expect(moreActions?.textContent).toContain("删除");
-    expect(root.querySelector(".capture-actions")?.textContent).toContain("打开来源");
+    expect(root.querySelector(".capture-row textarea")).toBeNull();
+    expect(root.querySelector(".capture-more-actions")).toBeNull();
+    expect(root.querySelector(".queue-detail")?.textContent).toContain("删除");
+    expect(root.querySelector(".queue-detail textarea")).toBeNull();
+    root.querySelector<HTMLButtonElement>(".queue-detail .note-edit-action")!.click();
+    expect(root.querySelector(".queue-detail textarea")).not.toBeNull();
   });
 
   it("routes note updates, duplicate promotion, and deletion through the background controller", async () => {
@@ -167,10 +168,10 @@ describe("local queue controller", () => {
     expect(root.textContent).toContain("待同步文章");
   });
 
-  it("excludes duplicate candidates from batch export until they are explicitly promoted", async () => {
+  it("exports only explicitly selected records as JSON, including a duplicate candidate", async () => {
     const root = createRoot();
     const client = new FakeMessageClient();
-    const downloads: Array<{ filename: string; content: string }> = [];
+    const downloads: Array<{ filename: string; content: string | Uint8Array }> = [];
     const controller = createQueueController({
       root,
       messageClient: client,
@@ -178,12 +179,15 @@ describe("local queue controller", () => {
     });
 
     await controller.load();
-    controller.exportSelected();
+    const checkbox = root.querySelector<HTMLInputElement>(`[data-capture-id="${duplicate.id}"] input[type="checkbox"]`)!;
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new root.ownerDocument.defaultView!.Event("change", { bubbles: true }));
+    await controller.exportSelected();
 
     expect(downloads).toHaveLength(1);
     expect(downloads[0]?.filename).toBe("ocf-captures.json");
-    expect(downloads[0]?.content).toContain(queued.id);
-    expect(downloads[0]?.content).not.toContain(duplicate.id);
+    expect(JSON.parse(downloads[0]?.content as string).map((record: CaptureRecord) => record.id)).toEqual([duplicate.id]);
+    expect(client.records.find((record) => record.id === duplicate.id)?.completedAt).toBeTruthy();
   });
 
   it("renders source-derived queue text as text rather than HTML", async () => {
@@ -196,5 +200,188 @@ describe("local queue controller", () => {
 
     expect(root.querySelector("img")).toBeNull();
     expect(root.textContent).toContain("<img src=x onerror=alert(1)>");
+  });
+
+  it("moves a single Markdown export into completed history without another user action", async () => {
+    const root = createRoot();
+    const client = new FakeMessageClient();
+    const downloads: string[] = [];
+    const controller = createQueueController({
+      root, messageClient: client,
+      download: (_content, filename) => downloads.push(filename),
+    });
+
+    await controller.load();
+    await controller.exportOne(queued.id);
+
+    expect(downloads).toEqual([`ocf-capture-${queued.id}.md`]);
+    expect(client.requests.at(-1)).toEqual({ type: "MARK_CAPTURES_COMPLETE", ids: [queued.id] });
+    expect(root.textContent).not.toContain("待同步文章");
+    controller.view("completed");
+    expect(root.textContent).toContain("待同步文章");
+  });
+
+  it("exports all visible inbox articles in one ZIP and moves them to completed history", async () => {
+    const root = createRoot();
+    const client = new FakeMessageClient();
+    const downloads: Array<{ content: string | Uint8Array; filename: string }> = [];
+    const controller = createQueueController({
+      root, messageClient: client,
+      download: (content, filename) => downloads.push({ content, filename }),
+    });
+
+    await controller.load();
+    await controller.exportAllZip();
+
+    expect(downloads).toHaveLength(1);
+    expect(downloads[0]?.filename).toMatch(/\.zip$/);
+    const files = unzipSync(downloads[0]!.content as Uint8Array);
+    expect(Object.keys(files).filter((path) => path.endsWith(".md"))).toHaveLength(2);
+    expect(JSON.parse(strFromU8(files["captures.json"]!)).map((record: CaptureRecord) => record.id))
+      .toEqual(expect.arrayContaining([queued.id, duplicate.id]));
+    expect(client.requests.at(-1)).toEqual({ type: "MARK_CAPTURES_COMPLETE", ids: expect.arrayContaining([queued.id, duplicate.id]) });
+    expect(root.querySelectorAll(".capture-row")).toHaveLength(0);
+  });
+
+  it("wires selection, ZIP export, and completed navigation in the page", async () => {
+    const root = createRoot();
+    const downloads: Array<string | Uint8Array> = [];
+    const controller = createQueueController({
+      root, messageClient: new FakeMessageClient(),
+      download: (content) => downloads.push(content),
+    });
+
+    await controller.load();
+    const checkbox = root.querySelector<HTMLInputElement>(`[data-capture-id="${queued.id}"] input[type="checkbox"]`)!;
+    checkbox.click();
+    expect(root.querySelector(".selection-count")?.textContent).toBe("已选 1 / 2 条");
+
+    root.querySelector<HTMLButtonElement>(".selection-primary")!.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(downloads).toHaveLength(1);
+    expect(Object.keys(unzipSync(downloads[0] as Uint8Array)).filter((path) => path.endsWith(".md"))).toHaveLength(1);
+    expect(root.querySelectorAll(".capture-row")).toHaveLength(1);
+    root.querySelectorAll<HTMLButtonElement>(".queue-nav-item")[1]!.click();
+    expect(root.querySelector(".queue-hero h1")?.textContent).toBe("已完成");
+    expect(root.querySelector(".queue-detail")?.textContent).toContain(queued.source.title);
+  });
+
+  it("makes completed history a full management view with clear re-export actions and completion time", async () => {
+    const root = createRoot();
+    const client = new FakeMessageClient();
+    client.records = [
+      { ...queued, completedAt: "2026-10-18T10:00:00.000Z" },
+      { ...duplicate, completedAt: "2026-10-18T11:00:00.000Z" },
+    ];
+    const controller = createQueueController({ root, messageClient: client, download: () => undefined });
+
+    await controller.load();
+    controller.view("completed");
+
+    expect(root.querySelector(".queue-search")).not.toBeNull();
+    expect(root.querySelector(".queue-toolbar")?.textContent).toContain("再次导出全部 ZIP");
+    expect(root.querySelector(".queue-selection-bar")?.textContent).toContain("再次导出所选 ZIP");
+    expect(root.querySelector(".queue-selection-bar")?.textContent).toContain("再次导出所选 JSON");
+    expect(root.querySelectorAll(".capture-row")).toHaveLength(2);
+    expect(root.querySelector(".capture-row")?.getAttribute("data-capture-id")).toBe(duplicate.id);
+    expect(root.querySelector(".capture-row .capture-meta")?.textContent).toContain("完成于");
+    expect(root.querySelector(".queue-detail")?.textContent).toContain("完成于");
+    expect(root.querySelector(".queue-detail")?.textContent).toContain("再次导出 Markdown");
+    expect(root.querySelector(".queue-detail .note-edit-action")).not.toBeNull();
+    expect(root.querySelector(".queue-detail .danger-action")).not.toBeNull();
+  });
+
+  it("keeps completed records in history and preserves their first completion time when re-exported", async () => {
+    const root = createRoot();
+    const client = new FakeMessageClient();
+    client.records = [{ ...queued, completedAt: "2026-10-18T10:00:00.000Z" }];
+    const downloads: string[] = [];
+    const controller = createQueueController({
+      root, messageClient: client,
+      download: (_content, filename) => downloads.push(filename),
+    });
+
+    await controller.load();
+    controller.view("completed");
+    root.querySelector<HTMLButtonElement>(".queue-export-action")!.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(downloads).toEqual(["ocf-captures.zip"]);
+    expect(client.records[0]?.completedAt).toBe("2026-10-18T10:00:00.000Z");
+    expect(client.requests.some((request) => request.type === "MARK_CAPTURES_COMPLETE")).toBe(false);
+    expect(root.querySelectorAll(".capture-row")).toHaveLength(1);
+    expect(root.querySelector(".queue-notice")?.textContent).toContain("重新导出");
+  });
+
+  it("shows all history on navigation even after searching the inbox", async () => {
+    const root = createRoot();
+    const client = new FakeMessageClient();
+    client.records = [queued, { ...duplicate, completedAt: "2026-10-18T11:00:00.000Z" }];
+    const controller = createQueueController({ root, messageClient: client, download: () => undefined });
+
+    await controller.load();
+    const search = root.querySelector<HTMLInputElement>(".queue-search")!;
+    search.value = "待同步";
+    search.dispatchEvent(new root.ownerDocument.defaultView!.Event("input", { bubbles: true }));
+    controller.view("completed");
+
+    expect(root.querySelector<HTMLInputElement>(".queue-search")?.value).toBe("");
+    expect(root.querySelector(".queue-detail")?.textContent).toContain(duplicate.source.title);
+  });
+
+  it("keeps an exported file downloadable when saving completion fails and reports the problem", async () => {
+    const root = createRoot();
+    const client = new FakeMessageClient();
+    client.failCompletion = true;
+    const downloads: string[] = [];
+    const controller = createQueueController({
+      root, messageClient: client,
+      download: (_content, filename) => downloads.push(filename),
+    });
+
+    await controller.load();
+    await controller.exportOne(queued.id);
+
+    expect(downloads).toHaveLength(1);
+    expect(root.textContent).toContain("待同步文章");
+    expect(root.querySelector(".queue-notice")?.textContent).toContain("未移入已完成");
+  });
+
+  it("limits one-click ZIP export to the current search results", async () => {
+    const root = createRoot();
+    const downloads: Array<string | Uint8Array> = [];
+    const controller = createQueueController({
+      root, messageClient: new FakeMessageClient(),
+      download: (content) => downloads.push(content),
+    });
+
+    await controller.load();
+    const search = root.querySelector<HTMLInputElement>(".queue-search")!;
+    search.value = "重复";
+    search.dispatchEvent(new root.ownerDocument.defaultView!.Event("input", { bubbles: true }));
+    expect(root.querySelectorAll(".capture-row")).toHaveLength(1);
+
+    await controller.exportAllZip();
+    const files = unzipSync(downloads[0] as Uint8Array);
+    expect(Object.keys(files).filter((path) => path.endsWith(".md"))).toHaveLength(1);
+    expect(JSON.parse(strFromU8(files["captures.json"]!)).map((record: CaptureRecord) => record.id))
+      .toEqual([duplicate.id]);
+  });
+
+  it("does not move an article to completed when the browser download cannot start", async () => {
+    const root = createRoot();
+    const client = new FakeMessageClient();
+    const controller = createQueueController({
+      root, messageClient: client,
+      download: () => { throw new Error("download blocked"); },
+    });
+
+    await controller.load();
+    await controller.exportOne(queued.id);
+
+    expect(client.requests.some((request) => request.type === "MARK_CAPTURES_COMPLETE")).toBe(false);
+    expect(root.textContent).toContain("待同步文章");
+    expect(root.querySelector(".queue-notice")?.textContent).toContain("未能下载");
   });
 });

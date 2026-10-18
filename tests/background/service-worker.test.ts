@@ -27,6 +27,7 @@ const record: CaptureRecord = {
 };
 
 function createRepository(records: CaptureRecord[] = [record]): CaptureRepositoryPort & { calls: string[]; failure?: Error } {
+  let currentRecords = records;
   const repository: CaptureRepositoryPort & { calls: string[]; failure?: Error } = {
     calls: [],
     async saveConfirmed(capture, note) {
@@ -37,7 +38,7 @@ function createRepository(records: CaptureRecord[] = [record]): CaptureRepositor
     async list() {
       repository.calls.push("list");
       if (repository.failure) throw repository.failure;
-      return records;
+      return currentRecords;
     },
     async updateNote(id, note) {
       repository.calls.push(`updateNote:${id}:${note}`);
@@ -52,6 +53,13 @@ function createRepository(records: CaptureRecord[] = [record]): CaptureRepositor
       repository.calls.push(`promoteDuplicate:${id}`);
       if (repository.failure) throw repository.failure;
       return id === record.id ? { ...record, delivery: { status: "queued", attempts: 0 } } : undefined;
+    },
+    async markCompleted(ids, completedAt) {
+      repository.calls.push(`markCompleted:${ids.join(",")}`);
+      if (repository.failure) throw repository.failure;
+      currentRecords = currentRecords.map((candidate) => ids.includes(candidate.id)
+        ? { ...candidate, completedAt: candidate.completedAt ?? completedAt }
+        : candidate);
     },
     async countByStatus() {
       repository.calls.push("countByStatus");
@@ -162,6 +170,30 @@ describe("background message controller", () => {
     });
     expect(repository.calls).toEqual(["promoteDuplicate:capture-1", "countByStatus"]);
     expect(chromePort.calls).toEqual(["setBadge:3"]);
+  });
+
+  it("moves exported records into completed history and refreshes the badge", async () => {
+    const chromePort = createFakeChromePort(extracted);
+    const repository = createRepository();
+    const controller = createBackgroundController({ chromePort, repository });
+
+    const response = await controller.handle({ type: "MARK_CAPTURES_COMPLETE", ids: [record.id] });
+
+    expect(response).toMatchObject({
+      ok: true,
+      type: "CAPTURES",
+      records: [{ id: record.id, completedAt: expect.any(String) }],
+    });
+    expect(repository.calls).toEqual([`markCompleted:${record.id}`, "countByStatus", "list"]);
+    expect(chromePort.calls).toEqual(["setBadge:3"]);
+  });
+
+  it("rejects an empty completion batch without changing the queue", async () => {
+    const repository = createRepository();
+    const controller = createBackgroundController({ chromePort: createFakeChromePort(extracted), repository });
+
+    await expect(controller.handle({ type: "MARK_CAPTURES_COMPLETE", ids: [] })).resolves.toMatchObject({ ok: false });
+    expect(repository.calls).toEqual([]);
   });
 
   it("returns the queue count and opens the requested local or source page", async () => {

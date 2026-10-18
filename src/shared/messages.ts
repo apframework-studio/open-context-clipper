@@ -8,6 +8,7 @@ export type ExtensionRequest =
   | { type: "UPDATE_CAPTURE_NOTE"; id: string; note?: string }
   | { type: "DELETE_CAPTURE"; id: string }
   | { type: "PROMOTE_DUPLICATE"; id: string }
+  | { type: "MARK_CAPTURES_COMPLETE"; ids: string[] }
   | { type: "OPEN_QUEUE" }
   | { type: "OPEN_SOURCE"; url: string };
 

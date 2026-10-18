@@ -121,7 +121,7 @@ export class CaptureRepository {
 
       if (sameUrl.length > 0) {
         const previous = latest(sameUrl);
-        if (previous.delivery.status !== "synced") {
+        if (previous.delivery.status !== "synced" && !previous.completedAt) {
           const updated = replacementFrom(previous, extracted, note);
           await requestResult(store.put(updated));
           return { kind: "updated-unsynced", record: updated };
@@ -184,10 +184,23 @@ export class CaptureRepository {
     });
   }
 
+  async markCompleted(ids: string[], completedAt: string): Promise<void> {
+    await this.withStore("readwrite", async (store) => {
+      const records = await Promise.all(ids.map((id) => requestResult<CaptureRecord | undefined>(store.get(id))));
+      if (records.some((record) => record === undefined)) {
+        throw new Error("A capture record was not found.");
+      }
+      await Promise.all(records.map((record) => requestResult(store.put({
+        ...record!,
+        completedAt: record!.completedAt ?? completedAt,
+      }))));
+    });
+  }
+
   async countByStatus(): Promise<StatusCounts> {
     return this.withStore("readonly", async (store) => {
       const records = await requestResult<CaptureRecord[]>(store.getAll());
-      return records.reduce<StatusCounts>(
+      return records.filter((record) => !record.completedAt).reduce<StatusCounts>(
         (counts, record) => {
           counts[record.delivery.status] += 1;
           return counts;

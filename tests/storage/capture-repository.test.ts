@@ -207,4 +207,34 @@ describe("CaptureRepository", () => {
     expect(await repository.get(saved.record.id)).toBeUndefined();
     expect(await repository.list()).toHaveLength(1);
   });
+
+  it("moves exported records to history without changing delivery status or their first completion time", async () => {
+    const first = await repository.saveConfirmed(capture("https://example.com/first", "hash-a"), "first");
+    const second = await repository.saveConfirmed(capture("https://example.com/second", "hash-b"), "second");
+
+    await repository.markCompleted([first.record.id, second.record.id], "2026-10-18T10:00:00.000Z");
+
+    expect((await repository.get(first.record.id))?.completedAt).toBe("2026-10-18T10:00:00.000Z");
+    expect((await repository.get(second.record.id))?.completedAt).toBe("2026-10-18T10:00:00.000Z");
+    expect((await repository.get(first.record.id))?.delivery.status).toBe("queued");
+    expect((await repository.countByStatus()).queued).toBe(0);
+
+    await repository.markCompleted([first.record.id], "2026-10-18T11:00:00.000Z");
+    expect((await repository.get(first.record.id))?.completedAt).toBe("2026-10-18T10:00:00.000Z");
+  });
+
+  it("returns a changed article to the inbox after the previous version was exported", async () => {
+    const saved = await repository.saveConfirmed(capture("https://example.com/post", "hash-a"), "first");
+    await repository.markCompleted([saved.record.id], "2026-10-18T10:00:00.000Z");
+
+    const changed = await repository.saveConfirmed(capture("https://example.com/post", "hash-b", "2026-10-18T11:00:00.000Z"), "second");
+
+    expect(changed.kind).toBe("new-version");
+    expect(changed.record.id).not.toBe(saved.record.id);
+    expect(changed.record.supersedes).toBe(saved.record.id);
+    expect(changed.record.completedAt).toBeUndefined();
+    expect((await repository.get(saved.record.id))?.completedAt).toBe("2026-10-18T10:00:00.000Z");
+    expect(await repository.list()).toHaveLength(2);
+    expect((await repository.countByStatus()).queued).toBe(1);
+  });
 });

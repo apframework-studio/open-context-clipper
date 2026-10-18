@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { recordToMarkdown, recordsToJson } from "../../src/queue/export";
+import { strFromU8, unzipSync } from "fflate";
+import { recordToMarkdown, recordsToJson, recordsToZip } from "../../src/queue/export";
 import type { CaptureRecord } from "../../src/shared/models";
 
 const record: CaptureRecord = {
@@ -43,5 +44,27 @@ describe("queue exports", () => {
 
     expect(JSON.parse(json)[0].schemaVersion).toBe(1);
     expect(json).toContain('\n    "schemaVersion": 1');
+  });
+
+  it("packages selected articles as separate safe Markdown files plus portable JSON", () => {
+    const second: CaptureRecord = {
+      ...record,
+      id: "capture-2",
+      source: { ...record.source, title: "../危险/文章" },
+      content: { ...record.content, markdown: "第二篇正文" },
+    };
+
+    const files = unzipSync(recordsToZip([record, second]));
+    const paths = Object.keys(files).sort();
+
+    expect(paths).toHaveLength(3);
+    expect(paths).toContain("captures.json");
+    expect(paths.every((path) => path === "captures.json" || (path.startsWith("articles/") && !path.slice(9).includes("/")))).toBe(true);
+    expect(paths.some((path) => path.includes("capture-1.md"))).toBe(true);
+    expect(paths.some((path) => path.includes("capture-2.md"))).toBe(true);
+    expect(paths.filter((path) => path.endsWith(".md")).map((path) => strFromU8(files[path]!)).join("\n"))
+      .toContain("第二篇正文");
+    expect(JSON.parse(strFromU8(files["captures.json"]!)).map((item: CaptureRecord) => item.id))
+      .toEqual(["capture-1", "capture-2"]);
   });
 });
