@@ -108,7 +108,9 @@ export function createQueueController({ root, messageClient, download = download
       [record.source.title, record.source.originalUrl, record.source.author ?? "", record.user.note ?? ""]
         .join(" ").toLocaleLowerCase().includes(searchQuery.toLocaleLowerCase()));
     return activeView === "completed"
-      ? matching.sort((left, right) => (right.completedAt ?? "").localeCompare(left.completedAt ?? ""))
+      ? matching.sort((left, right) =>
+        (right.completedAt ?? "").localeCompare(left.completedAt ?? "") ||
+        right.capture.capturedAt.localeCompare(left.capture.capturedAt))
       : matching;
   };
   const recordFor = (id: string) => records.find((record) => record.id === id);
@@ -121,12 +123,19 @@ export function createQueueController({ root, messageClient, download = download
       render();
       return;
     }
+    const repeatExport = exported.every((record) => Boolean(record.completedAt));
     try {
       download(content, filename, mimeType);
     } catch {
-      notice = activeView === "completed"
+      notice = repeatExport
         ? "导出文件未能下载，历史记录未改变。"
         : "导出文件未能下载，记录仍在收件箱。";
+      render();
+      return;
+    }
+    if (repeatExport) {
+      exported.forEach((record) => selected.delete(record.id));
+      notice = `已开始重新导出 ${exported.length} 条历史记录。`;
       render();
       return;
     }
@@ -135,13 +144,9 @@ export function createQueueController({ root, messageClient, download = download
       if (!response.ok || response.type !== "CAPTURES") throw new Error("Completion could not be saved.");
       records = response.records;
       exported.forEach((record) => selected.delete(record.id));
-      notice = activeView === "completed"
-        ? `已开始重新导出 ${exported.length} 条历史记录。`
-        : `已开始导出 ${exported.length} 条记录，并移入已完成。`;
+      notice = `已开始导出 ${exported.length} 条记录，并移入已完成。`;
     } catch {
-      notice = activeView === "completed"
-        ? "文件已开始下载，但历史记录状态未能确认，请稍后重试。"
-        : "文件已开始下载，但记录未移入已完成，请稍后重试。";
+      notice = "文件已开始下载，但记录未移入已完成，请稍后重试。";
     }
     render();
   };
@@ -180,7 +185,7 @@ export function createQueueController({ root, messageClient, download = download
     workspace.className = "queue-workspace";
     const hero = element(document, "header");
     hero.className = "queue-hero";
-    const eyebrow = element(document, "span", "本地队列 · 自主导出");
+    const eyebrow = element(document, "span", activeView === "completed" ? "本地历史 · 随时再导出" : "本地队列 · 自主导出");
     eyebrow.className = "queue-kicker";
     const heroCopy = element(document, "div");
     heroCopy.append(eyebrow, element(document, "h1", activeView === "inbox" ? "收件箱" : "已完成"));
@@ -198,7 +203,7 @@ export function createQueueController({ root, messageClient, download = download
     search.placeholder = "搜索标题、来源或备注";
     search.setAttribute("aria-label", "搜索采集记录");
     search.value = searchQuery;
-    search.addEventListener("input", () => {
+    const applySearch = () => {
       const caret = search.selectionStart;
       searchQuery = search.value.trim();
       selected.clear();
@@ -208,7 +213,12 @@ export function createQueueController({ root, messageClient, download = download
       const next = root.querySelector<HTMLInputElement>(".queue-search");
       next?.focus();
       if (caret !== null) next?.setSelectionRange(caret, caret);
+    };
+    search.addEventListener("input", (event) => {
+      if ((event as InputEvent).isComposing) return;
+      applySearch();
     });
+    search.addEventListener("compositionend", applySearch);
     const exportAll = element(document, "button", activeView === "completed" ? "再次导出全部 ZIP" : "导出全部 ZIP") as HTMLButtonElement;
     exportAll.type = "button";
     exportAll.className = "queue-export-action";

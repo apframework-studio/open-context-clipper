@@ -369,6 +369,23 @@ describe("local queue controller", () => {
       .toEqual([duplicate.id]);
   });
 
+  it("keeps the search field intact while composing Chinese text", async () => {
+    const root = createRoot();
+    const controller = createQueueController({ root, messageClient: new FakeMessageClient(), download: () => undefined });
+    await controller.load();
+
+    const search = root.querySelector<HTMLInputElement>(".queue-search")!;
+    search.value = "重";
+    const composingInput = new root.ownerDocument.defaultView!.Event("input", { bubbles: true });
+    Object.defineProperty(composingInput, "isComposing", { value: true });
+    search.dispatchEvent(composingInput);
+    expect(root.querySelector(".queue-search")).toBe(search);
+
+    search.value = "重复";
+    search.dispatchEvent(new root.ownerDocument.defaultView!.Event("compositionend", { bubbles: true }));
+    expect(root.querySelectorAll(".capture-row")).toHaveLength(1);
+  });
+
   it("does not move an article to completed when the browser download cannot start", async () => {
     const root = createRoot();
     const client = new FakeMessageClient();
