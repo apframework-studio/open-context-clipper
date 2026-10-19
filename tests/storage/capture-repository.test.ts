@@ -221,6 +221,26 @@ describe("CaptureRepository", () => {
 
     await repository.markCompleted([first.record.id], "2026-10-18T11:00:00.000Z");
     expect((await repository.get(first.record.id))?.completedAt).toBe("2026-10-18T10:00:00.000Z");
+    expect((await repository.get(first.record.id))?.lastExportedAt).toBe("2026-10-18T11:00:00.000Z");
+  });
+
+  it("cleans only expired completed records after a full grace period and keeps recently re-exported history", async () => {
+    const expired = await repository.saveConfirmed(capture("https://example.com/expired", "hash-expired"), "");
+    const reused = await repository.saveConfirmed(capture("https://example.com/reused", "hash-reused"), "");
+    const boundary = await repository.saveConfirmed(capture("https://example.com/boundary", "hash-boundary"), "");
+    const inbox = await repository.saveConfirmed(capture("https://example.com/inbox", "hash-inbox"), "");
+    await repository.markCompleted([expired.record.id, reused.record.id], "2026-09-01T00:00:00.000Z");
+    await repository.markCompleted([boundary.record.id], "2026-10-01T00:00:00.000Z");
+    await repository.markCompleted([reused.record.id], "2026-10-02T00:00:00.000Z");
+
+    expect(await repository.deleteExpiredCompleted("2026-10-01T00:00:00.000Z", "2026-10-15T00:00:00.000Z"))
+      .toBe(0);
+    expect(await repository.deleteExpiredCompleted("2026-10-01T00:00:00.000Z", "2026-08-01T00:00:00.000Z"))
+      .toBe(1);
+    expect(await repository.get(expired.record.id)).toBeUndefined();
+    expect(await repository.get(reused.record.id)).toBeDefined();
+    expect(await repository.get(boundary.record.id)).toBeDefined();
+    expect(await repository.get(inbox.record.id)).toBeDefined();
   });
 
   it("returns a changed article to the inbox after the previous version was exported", async () => {

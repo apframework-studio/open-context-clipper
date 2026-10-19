@@ -193,7 +193,21 @@ export class CaptureRepository {
       await Promise.all(records.map((record) => requestResult(store.put({
         ...record!,
         completedAt: record!.completedAt ?? completedAt,
+        lastExportedAt: completedAt,
       }))));
+    });
+  }
+
+  async deleteExpiredCompleted(cutoffIso: string, enabledAt: string): Promise<number> {
+    return this.withStore("readwrite", async (store) => {
+      const records = await requestResult<CaptureRecord[]>(store.getAll());
+      const expired = records.filter((record) => {
+        if (!record.completedAt) return false;
+        const retainedSince = [record.lastExportedAt ?? record.completedAt, enabledAt].sort().at(-1)!;
+        return retainedSince < cutoffIso;
+      });
+      await Promise.all(expired.map((record) => requestResult(store.delete(record.id))));
+      return expired.length;
     });
   }
 

@@ -32,6 +32,7 @@ export interface CaptureRecord extends ExtractedCapture {
   schemaVersion: 1;
   id: string;
   completedAt?: string;
+  lastExportedAt?: string;
   user: { note?: string };
   delivery: {
     status: DeliveryStatus;

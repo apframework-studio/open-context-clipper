@@ -236,6 +236,9 @@ button {
 
 .popup-state p { margin: 0; }
 .popup-error { border-color: #f1d7d7; color: #8c3434; background: #fffafa; }
+.popup-restricted { color: #324b6c; }
+.popup-restricted h1 { color: #1f3d78; }
+.popup-restricted .primary-action { width: 100%; margin-top: 5px; }
 .popup-success { color: #1d5c45; background: #f6fffa; }
 button:focus-visible { outline: 3px solid rgb(82 128 211 / 35%); outline-offset: 2px; }
 button:disabled { cursor: wait; opacity: .6; }

@@ -1,27 +1,43 @@
 /// <reference types="chrome" />
 
-import type { ExtensionRequest, ExtensionResponse } from "../shared/messages";
+import type { ExtensionRequest, ExtensionResponse, HistoryRetentionSetting } from "../shared/messages";
 import type { DeliveryStatus, ExtractedCapture } from "../shared/models";
 import { CaptureRepository } from "../storage/capture-repository";
 
 export interface ChromePort {
-  getActiveTab(): Promise<{ id?: number }>;
+  getActiveTab(): Promise<{ id?: number; url?: string }>;
   injectCaptureScript(tabId: number): Promise<void>;
   requestExtraction(tabId: number): Promise<ExtractedCapture>;
   setBadge(count: number): Promise<void>;
   openExtensionPage(path: string): Promise<void>;
   openUrl(url: string): Promise<void>;
+  getHistoryRetentionSetting(): Promise<unknown>;
+  setHistoryRetentionSetting(setting: HistoryRetentionSetting): Promise<void>;
 }
 
 export type CaptureRepositoryPort = Pick<
   CaptureRepository,
-  "saveConfirmed" | "list" | "updateNote" | "delete" | "promoteDuplicate" | "markCompleted" | "countByStatus"
+  "saveConfirmed" | "list" | "updateNote" | "delete" | "promoteDuplicate" | "markCompleted" | "deleteExpiredCompleted" | "countByStatus"
 >;
 
 type BackgroundDependencies = {
   chromePort: ChromePort;
   repository: CaptureRepositoryPort;
+  now?: () => Date;
 };
+
+function historySetting(value: unknown): HistoryRetentionSetting {
+  if (!value || typeof value !== "object") return { days: null };
+  const candidate = value as Record<string, unknown>;
+  if (candidate.days === null) return { days: null };
+  if ((candidate.days === 30 || candidate.days === 90) && typeof candidate.enabledAt === "string") {
+    const parsed = new Date(candidate.enabledAt);
+    if (!Number.isNaN(parsed.getTime()) && parsed.toISOString() === candidate.enabledAt) {
+      return { days: candidate.days, enabledAt: candidate.enabledAt };
+    }
+  }
+  return { days: null };
+}
 
 function responseError(code: string, message: string): ExtensionResponse {
   return { ok: false, code, message };
@@ -60,12 +76,21 @@ function isDeliveryStatus(value: unknown): value is DeliveryStatus {
   return value === "queued" || value === "duplicate" || value === "syncing" || value === "synced" || value === "failed";
 }
 
+function isRestrictedBrowserPage(url: string): boolean {
+  return /^(?:chrome|chrome-extension|chrome-search|chrome-untrusted|devtools|about):/i.test(url);
+}
+
+function isRestrictedInjectionError(error: unknown): boolean {
+  return error instanceof Error && /cannot access[^\n]*(?:chrome(?:-extension|-search|-untrusted)?|devtools|about):/i.test(error.message);
+}
+
 function isExtensionRequest(value: unknown): value is ExtensionRequest {
   if (!value || typeof value !== "object" || typeof (value as { type?: unknown }).type !== "string") return false;
   const request = value as Record<string, unknown>;
   switch (request.type) {
     case "EXTRACT_ACTIVE_TAB":
     case "GET_QUEUE_COUNT":
+    case "GET_HISTORY_SETTINGS":
     case "OPEN_QUEUE":
       return true;
     case "SAVE_CAPTURE":
@@ -81,6 +106,8 @@ function isExtensionRequest(value: unknown): value is ExtensionRequest {
       return Array.isArray(request.ids) && request.ids.length > 0 && request.ids.every((id) => typeof id === "string" && id.length > 0);
     case "OPEN_SOURCE":
       return typeof request.url === "string";
+    case "UPDATE_HISTORY_SETTINGS":
+      return request.days === null || request.days === 30 || request.days === 90;
     default:
       return false;
   }
@@ -92,6 +119,12 @@ async function refreshQueuedBadge({ chromePort, repository }: BackgroundDependen
 }
 
 export function createBackgroundController(deps: BackgroundDependencies) {
+  let retentionQueue: Promise<void> = Promise.resolve();
+  const serializeRetention = <T>(operation: () => Promise<T>): Promise<T> => {
+    const result = retentionQueue.then(operation);
+    retentionQueue = result.then(() => undefined, () => undefined);
+    return result;
+  };
   return {
     async handle(request: ExtensionRequest): Promise<ExtensionResponse> {
       try {
@@ -101,7 +134,17 @@ export function createBackgroundController(deps: BackgroundDependencies) {
             if (tab.id === undefined) {
               return responseError("NO_ACTIVE_TAB", "No active tab is available for capture.");
             }
-            await deps.chromePort.injectCaptureScript(tab.id);
+            if (tab.url && isRestrictedBrowserPage(tab.url)) {
+              return responseError("RESTRICTED_PAGE", "当前是浏览器内部页面，无法采集正文。");
+            }
+            try {
+              await deps.chromePort.injectCaptureScript(tab.id);
+            } catch (error) {
+              if (isRestrictedInjectionError(error)) {
+                return responseError("RESTRICTED_PAGE", "当前是浏览器内部页面，无法采集正文。");
+              }
+              throw error;
+            }
             const extracted = await deps.chromePort.requestExtraction(tab.id);
             if (!extracted.content.markdown.trim()) {
               return responseError("EMPTY_CONTENT", "未能识别可采集的正文，请确认文章已加载后重试。");
@@ -121,12 +164,44 @@ export function createBackgroundController(deps: BackgroundDependencies) {
             return { ok: true, type: "QUEUE_COUNT", count: counts.queued };
           }
           case "LIST_CAPTURES": {
+            const cleanupWarning = await serializeRetention(async () => {
+              try {
+                const setting = historySetting(await deps.chromePort.getHistoryRetentionSetting());
+                if (setting.days !== null) {
+                  const cutoff = new Date((deps.now?.() ?? new Date()).getTime() - setting.days * 86_400_000).toISOString();
+                  await deps.repository.deleteExpiredCompleted(cutoff, setting.enabledAt);
+                }
+                return undefined;
+              } catch {
+                return "历史记录自动清理未完成，请稍后重新打开队列。";
+              }
+            });
             const records = await deps.repository.list();
             return {
               ok: true,
               type: "CAPTURES",
               records: request.status === undefined ? records : records.filter((record) => record.delivery.status === request.status),
+              ...(cleanupWarning ? { cleanupWarning } : {}),
             };
+          }
+          case "GET_HISTORY_SETTINGS":
+            return serializeRetention(async () => ({
+              ok: true,
+              type: "HISTORY_SETTINGS",
+              settings: historySetting(await deps.chromePort.getHistoryRetentionSetting()),
+            }));
+          case "UPDATE_HISTORY_SETTINGS": {
+            if (request.days !== null && request.days !== 30 && request.days !== 90) {
+              return responseError("INVALID_RETENTION", "请选择永久、30 天或 90 天。");
+            }
+            return serializeRetention(async () => {
+              const prior = historySetting(await deps.chromePort.getHistoryRetentionSetting());
+              const setting: HistoryRetentionSetting = request.days === null
+                ? { days: null }
+                : { days: request.days, enabledAt: prior.days === request.days ? prior.enabledAt : (deps.now?.() ?? new Date()).toISOString() };
+              await deps.chromePort.setHistoryRetentionSetting(setting);
+              return { ok: true, type: "HISTORY_SETTINGS", settings: setting };
+            });
           }
           case "UPDATE_CAPTURE_NOTE": {
             const record = await deps.repository.updateNote(request.id, request.note ?? "");
@@ -147,9 +222,11 @@ export function createBackgroundController(deps: BackgroundDependencies) {
           }
           case "MARK_CAPTURES_COMPLETE": {
             if (request.ids.length === 0) return responseError("EMPTY_SELECTION", "No captures were selected for export.");
-            await deps.repository.markCompleted(request.ids, new Date().toISOString());
-            await refreshQueuedBadge(deps);
-            return { ok: true, type: "CAPTURES", records: await deps.repository.list() };
+            return serializeRetention(async () => {
+              await deps.repository.markCompleted(request.ids, (deps.now?.() ?? new Date()).toISOString());
+              await refreshQueuedBadge(deps);
+              return { ok: true, type: "CAPTURES", records: await deps.repository.list() };
+            });
           }
           case "OPEN_QUEUE":
             await deps.chromePort.openExtensionPage("queue.html");
@@ -166,7 +243,15 @@ export function createBackgroundController(deps: BackgroundDependencies) {
 }
 
 class ChromeApiPort implements ChromePort {
-  async getActiveTab(): Promise<{ id?: number }> {
+  async getHistoryRetentionSetting(): Promise<unknown> {
+    const stored = await chrome.storage.local.get("historyRetention");
+    return stored.historyRetention;
+  }
+
+  async setHistoryRetentionSetting(setting: HistoryRetentionSetting): Promise<void> {
+    await chrome.storage.local.set({ historyRetention: setting });
+  }
+  async getActiveTab(): Promise<{ id?: number; url?: string }> {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     return tab ?? {};
   }

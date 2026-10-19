@@ -102,6 +102,20 @@ export function createPopupController({ root, messageClient }: PopupDependencies
     root.replaceChildren(content);
   };
 
+  const renderRestricted = () => {
+    const document = root.ownerDocument;
+    const content = element(document, "section");
+    content.className = "popup-state popup-restricted";
+    content.append(element(document, "span", "采集当前文章"));
+    content.append(element(document, "h1", "当前页面不可采集"));
+    content.append(element(document, "p", "Chrome 内部页面不允许插件读取正文。切换到文章网页后，再点击插件即可采集。"));
+    content.append(element(document, "p", "已保存的文章可在队列中搜索、导出和管理。"));
+    const queue = createQueueButton();
+    queue.className = "primary-action";
+    content.append(queue);
+    root.replaceChildren(content);
+  };
+
   const renderSuccess = (message: string, count?: number) => {
     const content = element(root.ownerDocument, "section");
     content.className = "popup-state popup-success";
@@ -193,6 +207,10 @@ export function createPopupController({ root, messageClient }: PopupDependencies
       renderLoading();
       try {
         const response = await messageClient.send({ type: "EXTRACT_ACTIVE_TAB" });
+        if (!response.ok && response.code === "RESTRICTED_PAGE") {
+          renderRestricted();
+          return;
+        }
         if (!response.ok || response.type !== "EXTRACTION") {
           renderError(errorMessage(response));
           return;

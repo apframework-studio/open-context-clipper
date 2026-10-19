@@ -1,11 +1,13 @@
 import type { ChromePort } from "../../src/background/service-worker";
 import type { ExtractedCapture } from "../../src/shared/models";
+import type { HistoryRetentionSetting } from "../../src/shared/messages";
 
 export interface FakeChromePort extends ChromePort {
   calls: string[];
-  activeTab: { id?: number };
+  activeTab: { id?: number; url?: string };
   extraction: ExtractedCapture;
   failure?: Error;
+  historySettings?: HistoryRetentionSetting;
 }
 
 export function createFakeChromePort(extraction: ExtractedCapture): FakeChromePort {
@@ -13,6 +15,16 @@ export function createFakeChromePort(extraction: ExtractedCapture): FakeChromePo
     calls: [],
     activeTab: { id: 17 },
     extraction,
+    async getHistoryRetentionSetting() {
+      port.calls.push("getHistoryRetentionSetting");
+      if (port.failure) throw port.failure;
+      return port.historySettings;
+    },
+    async setHistoryRetentionSetting(setting) {
+      port.calls.push("setHistoryRetentionSetting");
+      if (port.failure) throw port.failure;
+      port.historySettings = setting;
+    },
     async getActiveTab() {
       port.calls.push("getActiveTab");
       if (port.failure) throw port.failure;

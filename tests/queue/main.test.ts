@@ -2,7 +2,7 @@ import { JSDOM } from "jsdom";
 import { strFromU8, unzipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import { createQueueController, type QueueMessageClient } from "../../src/queue/main";
-import type { ExtensionRequest, ExtensionResponse } from "../../src/shared/messages";
+import type { ExtensionRequest, ExtensionResponse, HistoryRetentionSetting } from "../../src/shared/messages";
 import type { CaptureRecord } from "../../src/shared/models";
 
 const queued: CaptureRecord = {
@@ -40,12 +40,21 @@ class FakeMessageClient implements QueueMessageClient {
   readonly requests: ExtensionRequest[] = [];
   records = [queued, duplicate];
   failCompletion = false;
+  settings: HistoryRetentionSetting = { days: null };
+  cleanupWarning = "";
+  failSettingsRead = false;
 
   async send(request: ExtensionRequest): Promise<ExtensionResponse> {
     this.requests.push(request);
     switch (request.type) {
       case "LIST_CAPTURES":
-        return { ok: true, type: "CAPTURES", records: this.records };
+        return { ok: true, type: "CAPTURES", records: this.records, ...(this.cleanupWarning ? { cleanupWarning: this.cleanupWarning } : {}) };
+      case "GET_HISTORY_SETTINGS":
+        if (this.failSettingsRead) return { ok: false, code: "STORAGE_FAILED", message: "Storage unavailable" };
+        return { ok: true, type: "HISTORY_SETTINGS", settings: this.settings };
+      case "UPDATE_HISTORY_SETTINGS":
+        this.settings = request.days === null ? { days: null } : { days: request.days, enabledAt: "2026-10-19T00:00:00.000Z" };
+        return { ok: true, type: "HISTORY_SETTINGS", settings: this.settings };
       case "UPDATE_CAPTURE_NOTE": {
         const record = this.records.find((candidate) => candidate.id === request.id)!;
         const updated = { ...record, user: { note: request.note } };
@@ -64,7 +73,7 @@ class FakeMessageClient implements QueueMessageClient {
       case "MARK_CAPTURES_COMPLETE":
         if (this.failCompletion) return { ok: false, code: "SAVE_FAILED", message: "IndexedDB unavailable" };
         this.records = this.records.map((record) => request.ids.includes(record.id)
-          ? { ...record, completedAt: record.completedAt ?? "2026-10-18T10:00:00.000Z" }
+          ? { ...record, completedAt: record.completedAt ?? "2026-10-18T10:00:00.000Z", lastExportedAt: "2026-10-19T00:00:00.000Z" }
           : record);
         return { ok: true, type: "CAPTURES", records: this.records };
       case "OPEN_SOURCE":
@@ -108,6 +117,20 @@ describe("local queue controller", () => {
     expect(root.querySelectorAll(".status-pill")).toHaveLength(2);
     expect(root.querySelector(".capture-row .capture-main")).not.toBeNull();
     expect(root.querySelector(".queue-detail")?.textContent).toContain("待同步文章");
+  });
+
+  it("selects the article from the whole highlighted row without treating its checkbox as a detail click", async () => {
+    const root = createRoot();
+    const controller = createQueueController({ root, messageClient: new FakeMessageClient(), download: () => undefined });
+    await controller.load();
+
+    root.querySelector<HTMLElement>(`[data-capture-id="${duplicate.id}"] .capture-meta`)!.click();
+    expect(root.querySelector(".capture-row.is-active")?.getAttribute("data-capture-id")).toBe(duplicate.id);
+    expect(root.querySelector(".queue-detail h2")?.textContent).toBe(duplicate.source.title);
+
+    root.querySelector<HTMLInputElement>(`[data-capture-id="${queued.id}"] input[type="checkbox"]`)!.click();
+    expect(root.querySelector(".capture-row.is-active")?.getAttribute("data-capture-id")).toBe(duplicate.id);
+    expect(root.querySelector(".queue-detail h2")?.textContent).toBe(duplicate.source.title);
   });
 
   it("uses inbox and completed as the only primary navigation views", async () => {
@@ -309,9 +332,95 @@ describe("local queue controller", () => {
 
     expect(downloads).toEqual(["ocf-captures.zip"]);
     expect(client.records[0]?.completedAt).toBe("2026-10-18T10:00:00.000Z");
-    expect(client.requests.some((request) => request.type === "MARK_CAPTURES_COMPLETE")).toBe(false);
+    expect(client.requests.at(-1)).toEqual({ type: "MARK_CAPTURES_COMPLETE", ids: [queued.id] });
+    expect(client.records[0]?.lastExportedAt).toBe("2026-10-19T00:00:00.000Z");
     expect(root.querySelectorAll(".capture-row")).toHaveLength(1);
     expect(root.querySelector(".queue-notice")?.textContent).toContain("重新导出");
+  });
+
+  it("offers a separate local history setting and saves the selected retention period", async () => {
+    const root = createRoot();
+    const client = new FakeMessageClient();
+    const controller = createQueueController({ root, messageClient: client, download: () => undefined });
+    await controller.load();
+
+    expect(root.querySelectorAll(".queue-nav-item")).toHaveLength(2);
+    await controller.openSettings();
+    expect(root.querySelector(".queue-hero h1")?.textContent).toBe("设置");
+    expect(root.querySelector<HTMLSelectElement>(".retention-select")?.value).toBe("forever");
+    expect(root.textContent).toContain("收件箱");
+    expect(root.textContent).toContain("已完成");
+    expect(root.textContent).toContain("下次打开队列");
+    expect(root.textContent).toContain("无法确认文件已经保存");
+
+    const select = root.querySelector<HTMLSelectElement>(".retention-select")!;
+    select.value = "30";
+    root.querySelector<HTMLButtonElement>(".retention-save")!.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(client.requests.at(-1)).toEqual({ type: "UPDATE_HISTORY_SETTINGS", days: 30 });
+    expect(client.settings.days).toBe(30);
+    expect(root.querySelector(".queue-notice")?.textContent).toContain("已保存");
+
+    await controller.updateHistorySettings(90);
+    expect(client.settings.days).toBe(90);
+    await controller.updateHistorySettings(null);
+    expect(client.settings).toEqual({ days: null });
+  });
+
+  it("shows a nonblocking cleanup warning above a readable queue", async () => {
+    const root = createRoot();
+    const client = new FakeMessageClient();
+    client.cleanupWarning = "历史记录自动清理未完成";
+    const controller = createQueueController({ root, messageClient: client, download: () => undefined });
+
+    await controller.load();
+    expect(root.querySelector(".queue-notice")?.textContent).toContain("历史记录自动清理未完成");
+    expect(root.querySelectorAll(".capture-row")).toHaveLength(2);
+  });
+
+  it("does not claim permanent retention when settings cannot be read", async () => {
+    const root = createRoot();
+    const client = new FakeMessageClient();
+    client.settings = { days: 30, enabledAt: "2026-10-19T00:00:00.000Z" };
+    client.failSettingsRead = true;
+    const controller = createQueueController({ root, messageClient: client, download: () => undefined });
+
+    await controller.load();
+    await controller.openSettings();
+    expect(root.querySelector(".queue-notice")?.textContent).toContain("读取设置失败");
+    expect(root.querySelector(".retention-select")).toBeNull();
+    expect(root.querySelector(".retention-save")).toBeNull();
+  });
+
+  it("prevents a second save while a retention update is pending", async () => {
+    const root = createRoot();
+    const client = new FakeMessageClient();
+    const originalSend = client.send.bind(client);
+    let finishSave!: () => void;
+    const blocked = new Promise<void>((resolve) => { finishSave = resolve; });
+    let saveCalls = 0;
+    client.send = async (request) => {
+      if (request.type === "UPDATE_HISTORY_SETTINGS") {
+        saveCalls += 1;
+        await blocked;
+      }
+      return originalSend(request);
+    };
+    const controller = createQueueController({ root, messageClient: client, download: () => undefined });
+
+    await controller.load();
+    await controller.openSettings();
+    const select = root.querySelector<HTMLSelectElement>(".retention-select")!;
+    select.value = "30";
+    const save = root.querySelector<HTMLButtonElement>(".retention-save")!;
+    save.click();
+    expect(save.disabled).toBe(true);
+    select.value = "90";
+    save.click();
+    expect(saveCalls).toBe(1);
+    finishSave();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(client.settings.days).toBe(30);
   });
 
   it("shows all history on navigation even after searching the inbox", async () => {

@@ -89,19 +89,21 @@ describe("popup capture confirmation", () => {
     await loading;
   });
 
-  it("keeps the queue accessible on restricted Chrome pages without offering save", async () => {
+  it("explains restricted Chrome pages and keeps the queue directly accessible", async () => {
     const root = createRoot();
     const requests: ExtensionRequest[] = [];
     const messageClient: MessageClient = {
       async send(request) {
         requests.push(request);
         return request.type === "EXTRACT_ACTIVE_TAB"
-          ? { ok: false, code: "REQUEST_FAILED", message: "Cannot access a chrome:// URL" }
+          ? { ok: false, code: "RESTRICTED_PAGE", message: "Cannot access a chrome:// URL" }
           : { ok: true, type: "OPENED" };
       },
     };
     await createPopupController({ root, messageClient }).load();
-    expect(root.textContent).toContain("Cannot access a chrome:// URL");
+    expect(root.textContent).toContain("当前页面不可采集");
+    expect(root.textContent).toContain("已保存的文章");
+    expect(root.textContent).not.toContain("Cannot access a chrome:// URL");
     expect(root.textContent).not.toContain("保存到采集队列");
     const button = [...root.querySelectorAll("button")].find((node) => node.textContent === "打开队列");
     expect(button).toBeDefined();

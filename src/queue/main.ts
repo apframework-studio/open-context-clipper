@@ -1,7 +1,7 @@
 import "./styles.css";
 
 import { downloadFile, recordToMarkdown, recordsToJson, recordsToZip } from "./export";
-import type { ExtensionRequest, ExtensionResponse } from "../shared/messages";
+import type { ExtensionRequest, ExtensionResponse, HistoryRetentionSetting } from "../shared/messages";
 import type { CaptureRecord, DeliveryStatus } from "../shared/models";
 
 export interface QueueMessageClient {
@@ -12,6 +12,8 @@ export interface QueueController {
   load(): Promise<void>;
   filter(status?: DeliveryStatus): void;
   view(view: "inbox" | "completed"): void;
+  openSettings(): Promise<void>;
+  updateHistorySettings(days: null | 30 | 90): Promise<void>;
   updateNote(id: string, note: string): Promise<void>;
   remove(id: string): Promise<void>;
   promoteDuplicate(id: string): Promise<void>;
@@ -94,7 +96,9 @@ class ChromeMessageClient implements QueueMessageClient {
 export function createQueueController({ root, messageClient, download = downloadFile }: QueueDependencies): QueueController {
   let records: CaptureRecord[] = [];
   let activeStatus: DeliveryStatus | undefined;
-  let activeView: "inbox" | "completed" = "inbox";
+  let activeView: "inbox" | "completed" | "settings" = "inbox";
+  let historySettings: HistoryRetentionSetting | undefined;
+  let savingHistorySettings = false;
   let activeRecordId: string | undefined;
   let noteEditing = false;
   let searchQuery = "";
@@ -102,6 +106,7 @@ export function createQueueController({ root, messageClient, download = download
   const selected = new Set<string>();
 
   const visibleRecords = () => {
+    if (activeView === "settings") return [];
     const matching = records.filter((record) =>
       Boolean(record.completedAt) === (activeView === "completed") &&
       (activeStatus === undefined || record.delivery.status === activeStatus) &&
@@ -133,20 +138,18 @@ export function createQueueController({ root, messageClient, download = download
       render();
       return;
     }
-    if (repeatExport) {
-      exported.forEach((record) => selected.delete(record.id));
-      notice = `已开始重新导出 ${exported.length} 条历史记录。`;
-      render();
-      return;
-    }
     try {
       const response = await messageClient.send({ type: "MARK_CAPTURES_COMPLETE", ids: exported.map((record) => record.id) });
       if (!response.ok || response.type !== "CAPTURES") throw new Error("Completion could not be saved.");
       records = response.records;
       exported.forEach((record) => selected.delete(record.id));
-      notice = `已开始导出 ${exported.length} 条记录，并移入已完成。`;
+      notice = repeatExport
+        ? `已开始重新导出 ${exported.length} 条历史记录。`
+        : `已开始导出 ${exported.length} 条记录，并移入已完成。`;
     } catch {
-      notice = "文件已开始下载，但记录未移入已完成，请稍后重试。";
+      notice = repeatExport
+        ? "文件已开始下载，但最近导出时间未能保存，请稍后重试。"
+        : "文件已开始下载，但记录未移入已完成，请稍后重试。";
     }
     render();
   };
@@ -179,21 +182,73 @@ export function createQueueController({ root, messageClient, download = download
       navigation.append(button);
     });
     rail.append(navigation);
+    const settingsNav = element(document, "button", "设置") as HTMLButtonElement;
+    settingsNav.type = "button";
+    settingsNav.className = "queue-settings-nav";
+    if (activeView === "settings") settingsNav.classList.add("is-active");
+    settingsNav.addEventListener("click", () => void controller.openSettings());
+    rail.append(settingsNav);
     rail.append(element(document, "p", "数据仅保存在此设备"));
 
     const workspace = element(document, "main");
     workspace.className = "queue-workspace";
     const hero = element(document, "header");
     hero.className = "queue-hero";
-    const eyebrow = element(document, "span", activeView === "completed" ? "本地历史 · 随时再导出" : "本地队列 · 自主导出");
+    const eyebrow = element(document, "span", activeView === "settings" ? "本地偏好" : activeView === "completed" ? "本地历史 · 随时再导出" : "本地队列 · 自主导出");
     eyebrow.className = "queue-kicker";
     const heroCopy = element(document, "div");
-    heroCopy.append(eyebrow, element(document, "h1", activeView === "inbox" ? "收件箱" : "已完成"));
-    heroCopy.append(element(document, "p", activeView === "inbox"
-      ? "选择文章导出，完成后自动归档。"
+    heroCopy.append(eyebrow, element(document, "h1", activeView === "settings" ? "设置" : activeView === "inbox" ? "收件箱" : "已完成"));
+    heroCopy.append(element(document, "p", activeView === "settings"
+      ? "配置一次，之后自动整理本地历史。"
+      : activeView === "inbox" ? "选择文章导出，完成后自动归档。"
       : "已导出的文章保留在这里，方便查找和再次下载。"));
     hero.append(heroCopy);
     workspace.append(hero);
+    if (activeView === "settings") {
+      if (notice) {
+        const message = element(document, "p", notice);
+        message.className = "queue-notice";
+        workspace.append(message);
+      }
+      const card = element(document, "section");
+      card.className = "settings-card";
+      card.append(element(document, "h2", "已完成记录保留期限"));
+      card.append(element(document, "p", "已完成是近期历史，方便搜索和再次导出。收件箱记录不会被自动清理。"));
+      if (!historySettings) {
+        card.append(element(document, "p", "暂时无法读取当前保留期限，请重试。"));
+        const retry = element(document, "button", "重试读取") as HTMLButtonElement;
+        retry.type = "button";
+        retry.addEventListener("click", () => void controller.openSettings());
+        card.append(retry);
+      } else {
+        const label = element(document, "label", "自动清理") as HTMLLabelElement;
+        label.htmlFor = "history-retention";
+        const select = element(document, "select") as HTMLSelectElement;
+        select.id = "history-retention";
+        select.className = "retention-select";
+        for (const [value, title] of [["forever", "永久保留"], ["30", "保留 30 天"], ["90", "保留 90 天"]]) {
+          const option = element(document, "option", title) as HTMLOptionElement;
+          option.value = value;
+          select.append(option);
+        }
+        select.value = historySettings.days === null ? "forever" : String(historySettings.days);
+        const save = element(document, "button", "保存设置") as HTMLButtonElement;
+        save.type = "button";
+        save.className = "retention-save";
+        save.addEventListener("click", () => void controller.updateHistorySettings(select.value === "forever" ? null : select.value === "30" ? 30 : 90));
+        const controls = element(document, "div");
+        controls.className = "settings-controls";
+        controls.append(label, select, save);
+        card.append(controls);
+        card.append(element(document, "p", "选择 30 天或 90 天后，已完成记录会在下次打开队列时检查并清理；启用时已有的记录至少再保留所选期限。重新导出会从最近导出时间重新计算。"));
+        card.append(element(document, "p", "扩展只能确认下载已发起，无法确认文件已经保存。自动清理前请确认重要文章的导出文件可用。"));
+      }
+      workspace.append(card);
+      layout.append(rail, workspace);
+      page.append(layout);
+      root.replaceChildren(page);
+      return;
+    }
     const visible = visibleRecords();
     const toolbar = element(document, "div");
     toolbar.className = "queue-toolbar";
@@ -280,6 +335,15 @@ export function createQueueController({ root, messageClient, download = download
       const row = element(document, "article");
       row.className = "capture-row";
       row.dataset.captureId = record.id;
+      const showRecord = () => {
+        activeRecordId = record.id;
+        noteEditing = false;
+        render();
+      };
+      row.addEventListener("click", (event) => {
+        if ((event.target as HTMLElement).closest("input, button")) return;
+        showRecord();
+      });
       const selection = element(document, "input") as HTMLInputElement;
       selection.type = "checkbox";
       selection.checked = selected.has(record.id);
@@ -296,11 +360,7 @@ export function createQueueController({ root, messageClient, download = download
       const heading = element(document, "button", record.source.title) as HTMLButtonElement;
       heading.type = "button";
       heading.className = "capture-title";
-      heading.addEventListener("click", () => {
-        activeRecordId = record.id;
-        noteEditing = false;
-        render();
-      });
+      heading.addEventListener("click", showRecord);
       const summary = element(
         document,
         "p",
@@ -395,6 +455,7 @@ export function createQueueController({ root, messageClient, download = download
           return;
         }
         records = response.records;
+        notice = response.cleanupWarning ?? "";
         selected.clear();
         activeRecordId = undefined;
         render();
@@ -419,6 +480,43 @@ export function createQueueController({ root, messageClient, download = download
       activeRecordId = undefined;
       noteEditing = false;
       render();
+    },
+
+    async openSettings() {
+      activeView = "settings";
+      historySettings = undefined;
+      notice = "";
+      try {
+        const response = await messageClient.send({ type: "GET_HISTORY_SETTINGS" });
+        if (!response.ok || response.type !== "HISTORY_SETTINGS") throw new Error("Settings unavailable.");
+        historySettings = response.settings;
+      } catch {
+        notice = "读取设置失败，请稍后重试。";
+      }
+      render();
+    },
+
+    async updateHistorySettings(days) {
+      if (!historySettings) {
+        notice = "读取当前设置后才能保存，请重试。";
+        render();
+        return;
+      }
+      if (savingHistorySettings) return;
+      savingHistorySettings = true;
+      const save = root.querySelector<HTMLButtonElement>(".retention-save");
+      if (save) save.disabled = true;
+      try {
+        const response = await messageClient.send({ type: "UPDATE_HISTORY_SETTINGS", days });
+        if (!response.ok || response.type !== "HISTORY_SETTINGS") throw new Error("Settings could not be saved.");
+        historySettings = response.settings;
+        notice = "设置已保存。";
+      } catch {
+        notice = "保存设置失败，请稍后重试。";
+      } finally {
+        savingHistorySettings = false;
+        render();
+      }
     },
 
     async updateNote(id, note) {
