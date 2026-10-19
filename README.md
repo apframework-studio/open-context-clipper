@@ -17,7 +17,7 @@ Open Context Clipper 是一款开源 Chrome 扩展。打开文章后点击扩展
 在当前文章页点击扩展图标。弹窗会显示识别结果和正文预览；点击“保存到采集队列”后，文章才会进入本地队列。关闭弹窗不会保存。
 
 <p align="center">
-  <img src="docs/images/capture-preview.png" alt="采集预览弹窗：核对文章内容后保存到采集队列" width="554">
+  <img src="docs/images/capture-preview.png" alt="采集预览弹窗：核对文章内容后保存到采集队列" width="300">
 </p>
 
 ### 在浏览器窗口管理文章
