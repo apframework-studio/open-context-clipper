@@ -69,6 +69,45 @@ function createRoot(): HTMLElement {
 }
 
 describe("popup capture confirmation", () => {
+  it("shows an English preview and translates legacy warning codes without changing the article", async () => {
+    const root = createRoot();
+    await createPopupController({
+      root,
+      messageClient: {
+        async send() {
+          return { ok: true, type: "EXTRACTION", extracted: {
+            ...extracted,
+            capture: { ...extracted.capture, warnings: ["content_too_short", "检测到登录或付费阅读提示，当前采集可能仅包含预览，正文可能不完整。请确认后保存。"] },
+          } };
+        },
+      },
+      locale: "en",
+    }).load();
+
+    expect(root.textContent).toContain("Save to queue");
+    expect(root.textContent).toContain("Open queue");
+    expect(root.textContent).toContain("Remote images");
+    expect(root.textContent).toContain("Author:");
+    expect(root.textContent).not.toContain("Author：");
+    expect(root.textContent).toContain("Published: 09/19/2026");
+    expect(root.textContent).toContain("The article may be incomplete");
+    expect(root.textContent).toContain(extracted.source.title);
+    expect(root.textContent).not.toContain("检测到登录");
+    expect(root.ownerDocument.documentElement.lang).toBe("en");
+  });
+
+  it("shows an English error for a background failure code rather than its raw Chinese message", async () => {
+    const root = createRoot();
+    await createPopupController({
+      root,
+      messageClient: { async send() { return { ok: false, code: "EMPTY_CONTENT", message: "未能识别可采集的正文" }; } },
+      locale: "en",
+    }).load();
+
+    expect(root.textContent).toContain("Could not find article content");
+    expect(root.textContent).not.toContain("未能识别");
+  });
+
   it("opens the queue while extraction is still loading", async () => {
     const root = createRoot();
     const requests: ExtensionRequest[] = [];

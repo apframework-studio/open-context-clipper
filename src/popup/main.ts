@@ -3,6 +3,7 @@ import "./styles.css";
 import type { ExtensionRequest, ExtensionResponse } from "../shared/messages";
 import type { ExtractedCapture, SaveOutcome } from "../shared/models";
 import { createTextPreview } from "../shared/preview";
+import { ChromeLanguageStore, errorText, resolveLocale, t, warningText, type Locale } from "../shared/i18n";
 
 export interface MessageClient {
   send(request: ExtensionRequest): Promise<ExtensionResponse>;
@@ -17,6 +18,7 @@ export interface PopupController {
 type PopupDependencies = {
   root: HTMLElement;
   messageClient: MessageClient;
+  locale?: Locale;
 };
 
 function element<K extends keyof HTMLElementTagNameMap>(
@@ -29,11 +31,11 @@ function element<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
-function field(document: Document, label: string, value?: string): HTMLElement | undefined {
+function field(document: Document, locale: Locale, label: string, value?: string): HTMLElement | undefined {
   if (!value) return undefined;
   const row = element(document, "p");
   row.className = "metadata-row";
-  const name = element(document, "span", `${label}：`);
+  const name = element(document, "span", `${label}${locale === "en" ? ": " : "："}`);
   name.className = "metadata-label";
   const content = element(document, "span", value);
   row.append(name, content);
@@ -50,23 +52,34 @@ function metric(document: Document, label: string, value: string): HTMLElement {
   return item;
 }
 
-function messageForOutcome(outcome: SaveOutcome): string {
+function publishedDate(value: string | undefined, locale: Locale): string | undefined {
+  if (!value) return undefined;
+  if (!/^\d{4}-\d{2}-\d{2}(?:T.*)?$/.test(value)) return value;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString(locale, {
+    year: "numeric", month: "2-digit", day: "2-digit",
+    ...(value.length === 10 ? { timeZone: "UTC" } : {}),
+  });
+}
+
+function messageForOutcome(outcome: SaveOutcome, locale: Locale): string {
   switch (outcome.kind) {
     case "unchanged-duplicate":
-      return "这篇文章已经采集，内容没有变化。";
+      return t(locale, "outcomeUnchanged");
     case "new-version":
-      return "检测到正文变化，已保存为新版本。";
+      return t(locale, "outcomeVersion");
     case "duplicate-candidate":
-      return "发现相同正文的另一来源，已作为重复候选保存。";
+      return t(locale, "outcomeDuplicate");
     case "updated-unsynced":
-      return "已更新尚未同步的采集记录。";
+      return t(locale, "outcomeUpdated");
     case "saved":
-      return "已保存到采集队列";
+      return t(locale, "outcomeSaved");
   }
 }
 
-function errorMessage(response: ExtensionResponse): string {
-  return response.ok ? "发生未知错误。" : response.message || "请求失败，请稍后重试。";
+function errorMessage(response: ExtensionResponse, locale: Locale): string {
+  return response.ok ? t(locale, "requestFailed") : errorText(locale, response.code);
 }
 
 class ChromeMessageClient implements MessageClient {
@@ -75,13 +88,14 @@ class ChromeMessageClient implements MessageClient {
   }
 }
 
-export function createPopupController({ root, messageClient }: PopupDependencies): PopupController {
+export function createPopupController({ root, messageClient, locale = "zh-CN" }: PopupDependencies): PopupController {
+  root.ownerDocument.documentElement.lang = locale;
   let extracted: ExtractedCapture | undefined;
   let noteInput: HTMLInputElement | undefined;
   let primaryButton: HTMLButtonElement | undefined;
 
   const createQueueButton = () => {
-    const button = element(root.ownerDocument, "button", "打开队列");
+    const button = element(root.ownerDocument, "button", t(locale, "openQueue"));
     button.type = "button";
     button.className = "secondary-action";
     button.addEventListener("click", () => void controller.openQueue());
@@ -91,7 +105,7 @@ export function createPopupController({ root, messageClient }: PopupDependencies
   const renderLoading = () => {
     const state = element(root.ownerDocument, "section");
     state.className = "popup-state popup-loading";
-    state.append(element(root.ownerDocument, "span", "Capture Plane"), element(root.ownerDocument, "p", "正在识别正文…"), createQueueButton());
+    state.append(element(root.ownerDocument, "span", "Capture Plane"), element(root.ownerDocument, "p", t(locale, "loading")), createQueueButton());
     root.replaceChildren(state);
   };
 
@@ -106,10 +120,10 @@ export function createPopupController({ root, messageClient }: PopupDependencies
     const document = root.ownerDocument;
     const content = element(document, "section");
     content.className = "popup-state popup-restricted";
-    content.append(element(document, "span", "采集当前文章"));
-    content.append(element(document, "h1", "当前页面不可采集"));
-    content.append(element(document, "p", "Chrome 内部页面不允许插件读取正文。切换到文章网页后，再点击插件即可采集。"));
-    content.append(element(document, "p", "已保存的文章可在队列中搜索、导出和管理。"));
+    content.append(element(document, "span", t(locale, "captureArticle")));
+    content.append(element(document, "h1", t(locale, "restrictedTitle")));
+    content.append(element(document, "p", t(locale, "restrictedReason")));
+    content.append(element(document, "p", t(locale, "restrictedQueue")));
     const queue = createQueueButton();
     queue.className = "primary-action";
     content.append(queue);
@@ -119,7 +133,7 @@ export function createPopupController({ root, messageClient }: PopupDependencies
   const renderSuccess = (message: string, count?: number) => {
     const content = element(root.ownerDocument, "section");
     content.className = "popup-state popup-success";
-    const summary = count === undefined ? message : `${message}（当前 ${count} 条）`;
+    const summary = count === undefined ? message : t(locale, "successCount", { message, count });
     content.append(element(root.ownerDocument, "p", summary));
     content.append(createQueueButton());
     root.replaceChildren(content);
@@ -141,17 +155,17 @@ export function createPopupController({ root, messageClient }: PopupDependencies
     const metrics = element(document, "div");
     metrics.className = "capture-metrics";
     metrics.append(
-      metric(document, "来源", capture.source.siteName ?? "网页"),
-      metric(document, "字数", `${capture.content.wordCount}`),
-      metric(document, "远程图片：", `${capture.content.imageUrls.length} 张`),
+      metric(document, t(locale, "site"), capture.source.siteName ?? t(locale, "webpage")),
+      metric(document, t(locale, "wordCount"), `${capture.content.wordCount}`),
+      metric(document, t(locale, "remoteImages"), t(locale, "imageCount", { count: capture.content.imageUrls.length })),
     );
     container.append(metrics);
 
     const metadata = element(document, "div");
     metadata.className = "metadata metadata-details";
     [
-      field(document, "作者", capture.source.author ?? "未识别"),
-      field(document, "发布日期", capture.source.publishedAt ?? "未识别"),
+      field(document, locale, t(locale, "author"), capture.source.author ?? t(locale, "unknown")),
+      field(document, locale, t(locale, "publishedAt"), publishedDate(capture.source.publishedAt, locale) ?? t(locale, "unknown")),
     ].forEach((row) => row && metadata.append(row));
     container.append(metadata);
 
@@ -161,7 +175,7 @@ export function createPopupController({ root, messageClient }: PopupDependencies
     opening.className = "preview-copy preview-opening";
     previewSection.append(opening);
     if (preview.omittedCharacters > 0) {
-      const omission = element(document, "p", `··· 已省略 ${preview.omittedCharacters} 字 ···`);
+      const omission = element(document, "p", t(locale, "omitted", { count: preview.omittedCharacters }));
       omission.className = "omission";
       const closing = element(document, "p", preview.closing);
       closing.className = "preview-copy preview-closing";
@@ -170,30 +184,30 @@ export function createPopupController({ root, messageClient }: PopupDependencies
     const previewScroll = element(document, "div");
     previewScroll.className = "preview-scroll";
     previewScroll.tabIndex = 0;
-    previewScroll.setAttribute("aria-label", "正文摘录，可滚动阅读");
+    previewScroll.setAttribute("aria-label", t(locale, "previewAria"));
     previewScroll.append(previewSection);
     container.append(previewScroll);
 
     if (capture.capture.warnings.length > 0) {
       const warnings = element(document, "ul");
       warnings.className = "warnings";
-      capture.capture.warnings.forEach((warning) => warnings.append(element(document, "li", warning)));
+      capture.capture.warnings.forEach((warning) => warnings.append(element(document, "li", warningText(locale, warning))));
       container.append(warnings);
     }
 
-    const noteLabel = element(document, "label", "备注（可选）");
+    const noteLabel = element(document, "label", t(locale, "noteOptional"));
     noteLabel.className = "note-label";
     noteLabel.htmlFor = "capture-note";
     noteInput = element(document, "input") as HTMLInputElement;
     noteInput.id = "capture-note";
     noteInput.type = "text";
     noteInput.maxLength = 280;
-    noteInput.placeholder = "例如：面向上下文工程";
+    noteInput.placeholder = t(locale, "noteExample");
     container.append(noteLabel, noteInput);
 
     const actions = element(document, "div");
     actions.className = "popup-actions";
-    primaryButton = element(document, "button", "保存到采集队列") as HTMLButtonElement;
+    primaryButton = element(document, "button", t(locale, "saveQueue")) as HTMLButtonElement;
     primaryButton.type = "button";
     primaryButton.className = "primary-action";
     primaryButton.addEventListener("click", () => void controller.save(noteInput?.value ?? ""));
@@ -212,19 +226,19 @@ export function createPopupController({ root, messageClient }: PopupDependencies
           return;
         }
         if (!response.ok || response.type !== "EXTRACTION") {
-          renderError(errorMessage(response));
+          renderError(errorMessage(response, locale));
           return;
         }
         extracted = response.extracted;
         renderPreview(extracted);
-      } catch (error) {
-        renderError(error instanceof Error ? error.message : "识别正文失败，请稍后重试。");
+      } catch {
+        renderError(t(locale, "extractionFailed"));
       }
     },
 
     async save(note) {
       if (!extracted) {
-        renderError("请先完成正文识别后再保存。");
+        renderError(t(locale, "extractFirst"));
         return;
       }
       if (primaryButton) primaryButton.disabled = true;
@@ -236,31 +250,31 @@ export function createPopupController({ root, messageClient }: PopupDependencies
         });
         if (!response.ok || response.type !== "SAVED") {
           if (primaryButton) primaryButton.disabled = false;
-          renderError(errorMessage(response));
+          renderError(errorMessage(response, locale));
           return;
         }
         try {
           const countResponse = await messageClient.send({ type: "GET_QUEUE_COUNT" });
           if (countResponse.ok && countResponse.type === "QUEUE_COUNT") {
-            renderSuccess(messageForOutcome(response.outcome), countResponse.count);
+            renderSuccess(messageForOutcome(response.outcome, locale), countResponse.count);
             return;
           }
         } catch {
           // 保存已完成；队列计数只能作为补充信息。
         }
-        renderSuccess(`${messageForOutcome(response.outcome)}，但暂时无法读取队列数量`);
-      } catch (error) {
+        renderSuccess(t(locale, "countUnavailable", { message: messageForOutcome(response.outcome, locale) }));
+      } catch {
         if (primaryButton) primaryButton.disabled = false;
-        renderError(error instanceof Error ? error.message : "保存采集失败，请稍后重试。");
+        renderError(t(locale, "saveFailed"));
       }
     },
 
     async openQueue() {
       try {
         const response = await messageClient.send({ type: "OPEN_QUEUE" });
-        if (!response.ok) renderError(errorMessage(response));
-      } catch (error) {
-        renderError(error instanceof Error ? error.message : "打开队列失败，请稍后重试。");
+        if (!response.ok) renderError(errorMessage(response, locale));
+      } catch {
+        renderError(t(locale, "openQueueFailed"));
       }
     },
   };
@@ -270,5 +284,10 @@ export function createPopupController({ root, messageClient }: PopupDependencies
 
 const root = typeof document === "undefined" ? undefined : document.querySelector<HTMLElement>("#root");
 if (root) {
-  void createPopupController({ root, messageClient: new ChromeMessageClient() }).load();
+  void (async () => {
+    const store = new ChromeLanguageStore();
+    const preference = await store.get().catch(() => "auto" as const);
+    const locale = resolveLocale(preference, chrome.i18n.getUILanguage());
+    await createPopupController({ root, messageClient: new ChromeMessageClient(), locale }).load();
+  })();
 }

@@ -3,6 +3,7 @@ import "./styles.css";
 import { downloadFile, recordToMarkdown, recordsToJson, recordsToZip } from "./export";
 import type { ExtensionRequest, ExtensionResponse, HistoryRetentionSetting } from "../shared/messages";
 import type { CaptureRecord, DeliveryStatus } from "../shared/models";
+import { ChromeLanguageStore, resolveLocale, t, type LanguagePreference, type LanguageStore, type Locale } from "../shared/i18n";
 
 export interface QueueMessageClient {
   send(request: ExtensionRequest): Promise<ExtensionResponse>;
@@ -13,6 +14,7 @@ export interface QueueController {
   filter(status?: DeliveryStatus): void;
   view(view: "inbox" | "completed"): void;
   openSettings(): Promise<void>;
+  updateLanguage(value: LanguagePreference): Promise<void>;
   updateHistorySettings(days: null | 30 | 90): Promise<void>;
   updateNote(id: string, note: string): Promise<void>;
   remove(id: string): Promise<void>;
@@ -30,15 +32,18 @@ type QueueDependencies = {
   root: HTMLElement;
   messageClient: QueueMessageClient;
   download?: Download;
+  locale?: Locale;
+  browserLanguage?: string;
+  languageStore?: LanguageStore;
 };
 
-const statusLabels: Record<DeliveryStatus, string> = {
-  queued: "待导出",
-  duplicate: "内容重复",
-  syncing: "同步中",
-  synced: "已同步",
-  failed: "失败",
-};
+const statusKeys = {
+  queued: "statusQueued",
+  duplicate: "statusDuplicate",
+  syncing: "statusSyncing",
+  synced: "statusSynced",
+  failed: "statusFailed",
+} as const;
 
 function element<K extends keyof HTMLElementTagNameMap>(
   document: Document,
@@ -69,22 +74,29 @@ function textExcerpt(record: CaptureRecord): string {
     .slice(0, 180);
 }
 
-function completionLabel(completedAt: string): string {
+function completionLabel(completedAt: string, locale: Locale): string {
   const date = new Date(completedAt);
-  const formatted = Number.isNaN(date.getTime()) ? completedAt : date.toLocaleString("zh-CN", {
+  const formatted = Number.isNaN(date.getTime()) ? completedAt : date.toLocaleString(locale, {
     year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
   });
-  return `完成于 ${formatted}`;
+  return t(locale, "completedOn", { date: formatted });
 }
 
-function statusPill(document: Document, status: DeliveryStatus, completed: boolean): HTMLElement {
-  const pill = element(document, "span", completed ? "已完成" : statusLabels[status]);
+function captureDateLabel(capturedAt: string, locale: Locale): string {
+  const date = new Date(capturedAt);
+  return Number.isNaN(date.getTime()) ? capturedAt.slice(0, 10) : date.toLocaleDateString(locale, {
+    year: "numeric", month: "2-digit", day: "2-digit",
+  });
+}
+
+function statusPill(document: Document, status: DeliveryStatus, completed: boolean, locale: Locale): HTMLElement {
+  const pill = element(document, "span", completed ? t(locale, "completed") : t(locale, statusKeys[status]));
   pill.className = `status-pill status-${completed ? "completed" : status}`;
   return pill;
 }
 
-function responseMessage(_response: ExtensionResponse): string {
-  return "操作失败，请稍后重试。";
+function responseMessage(_response: ExtensionResponse, locale: Locale): string {
+  return t(locale, "operationFailed");
 }
 
 class ChromeMessageClient implements QueueMessageClient {
@@ -93,12 +105,16 @@ class ChromeMessageClient implements QueueMessageClient {
   }
 }
 
-export function createQueueController({ root, messageClient, download = downloadFile }: QueueDependencies): QueueController {
+export function createQueueController({ root, messageClient, download = downloadFile, locale: initialLocale = "zh-CN", browserLanguage = "zh-CN", languageStore }: QueueDependencies): QueueController {
+  let locale = initialLocale;
+  let languagePreference: LanguagePreference = "auto";
   let records: CaptureRecord[] = [];
   let activeStatus: DeliveryStatus | undefined;
   let activeView: "inbox" | "completed" | "settings" = "inbox";
   let historySettings: HistoryRetentionSetting | undefined;
+  let retentionDraft: "forever" | "30" | "90" | undefined;
   let savingHistorySettings = false;
+  let savingLanguage = false;
   let activeRecordId: string | undefined;
   let noteEditing = false;
   let searchQuery = "";
@@ -124,7 +140,7 @@ export function createQueueController({ root, messageClient, download = download
     exported: CaptureRecord[], content: string | Uint8Array, filename: string, mimeType: string,
   ): Promise<void> => {
     if (exported.length === 0) {
-      notice = "没有可导出的记录。";
+      notice = t(locale, "nothingToExport");
       render();
       return;
     }
@@ -133,8 +149,8 @@ export function createQueueController({ root, messageClient, download = download
       download(content, filename, mimeType);
     } catch {
       notice = repeatExport
-        ? "导出文件未能下载，历史记录未改变。"
-        : "导出文件未能下载，记录仍在收件箱。";
+        ? t(locale, "downloadHistoryFailed")
+        : t(locale, "downloadInboxFailed");
       render();
       return;
     }
@@ -144,18 +160,20 @@ export function createQueueController({ root, messageClient, download = download
       records = response.records;
       exported.forEach((record) => selected.delete(record.id));
       notice = repeatExport
-        ? `已开始重新导出 ${exported.length} 条历史记录。`
-        : `已开始导出 ${exported.length} 条记录，并移入已完成。`;
+        ? t(locale, "reexportStarted", { count: exported.length })
+        : t(locale, "exportStarted", { count: exported.length });
     } catch {
       notice = repeatExport
-        ? "文件已开始下载，但最近导出时间未能保存，请稍后重试。"
-        : "文件已开始下载，但记录未移入已完成，请稍后重试。";
+        ? t(locale, "reexportSaveFailed")
+        : t(locale, "exportSaveFailed");
     }
     render();
   };
 
   const render = () => {
     const document = root.ownerDocument;
+    document.documentElement.lang = locale;
+    document.title = t(locale, "queueTitle");
     const page = element(document, "section");
     page.className = "queue-page";
     const layout = element(document, "div");
@@ -164,13 +182,13 @@ export function createQueueController({ root, messageClient, download = download
     rail.className = "queue-rail";
     rail.append(element(document, "div", "O"));
     rail.lastElementChild!.className = "queue-brand";
-    rail.append(element(document, "span", "浏览"));
+    rail.append(element(document, "span", t(locale, "browse")));
     rail.lastElementChild!.className = "queue-rail-label";
     const navigation = element(document, "nav");
     navigation.className = "queue-navigation";
     const navigationItems: Array<{ label: string; view: "inbox" | "completed"; count: number }> = [
-      { label: "收件箱", view: "inbox", count: records.filter((record) => !record.completedAt).length },
-      { label: "已完成", view: "completed", count: records.filter((record) => Boolean(record.completedAt)).length },
+      { label: t(locale, "inbox"), view: "inbox", count: records.filter((record) => !record.completedAt).length },
+      { label: t(locale, "completed"), view: "completed", count: records.filter((record) => Boolean(record.completedAt)).length },
     ];
     navigationItems.forEach((item) => {
       const button = element(document, "button") as HTMLButtonElement;
@@ -182,26 +200,26 @@ export function createQueueController({ root, messageClient, download = download
       navigation.append(button);
     });
     rail.append(navigation);
-    const settingsNav = element(document, "button", "设置") as HTMLButtonElement;
+    const settingsNav = element(document, "button", t(locale, "settings")) as HTMLButtonElement;
     settingsNav.type = "button";
     settingsNav.className = "queue-settings-nav";
     if (activeView === "settings") settingsNav.classList.add("is-active");
     settingsNav.addEventListener("click", () => void controller.openSettings());
     rail.append(settingsNav);
-    rail.append(element(document, "p", "数据仅保存在此设备"));
+    rail.append(element(document, "p", t(locale, "localOnly")));
 
     const workspace = element(document, "main");
     workspace.className = "queue-workspace";
     const hero = element(document, "header");
     hero.className = "queue-hero";
-    const eyebrow = element(document, "span", activeView === "settings" ? "本地偏好" : activeView === "completed" ? "本地历史 · 随时再导出" : "本地队列 · 自主导出");
+    const eyebrow = element(document, "span", activeView === "settings" ? t(locale, "settingsKicker") : activeView === "completed" ? t(locale, "completedKicker") : t(locale, "inboxKicker"));
     eyebrow.className = "queue-kicker";
     const heroCopy = element(document, "div");
-    heroCopy.append(eyebrow, element(document, "h1", activeView === "settings" ? "设置" : activeView === "inbox" ? "收件箱" : "已完成"));
+    heroCopy.append(eyebrow, element(document, "h1", activeView === "settings" ? t(locale, "settings") : activeView === "inbox" ? t(locale, "inbox") : t(locale, "completed")));
     heroCopy.append(element(document, "p", activeView === "settings"
-      ? "配置一次，之后自动整理本地历史。"
-      : activeView === "inbox" ? "选择文章导出，完成后自动归档。"
-      : "已导出的文章保留在这里，方便查找和再次下载。"));
+      ? t(locale, "settingsSubtitle")
+      : activeView === "inbox" ? t(locale, "inboxSubtitle")
+      : t(locale, "completedSubtitle")));
     hero.append(heroCopy);
     workspace.append(hero);
     if (activeView === "settings") {
@@ -210,29 +228,57 @@ export function createQueueController({ root, messageClient, download = download
         message.className = "queue-notice";
         workspace.append(message);
       }
+      const languageCard = element(document, "section");
+      languageCard.className = "settings-card";
+      languageCard.append(element(document, "h2", t(locale, "language")));
+      languageCard.append(element(document, "p", t(locale, "languageHelp")));
+      const languageLabel = element(document, "label", t(locale, "language")) as HTMLLabelElement;
+      languageLabel.htmlFor = "ui-language";
+      const languageSelect = element(document, "select") as HTMLSelectElement;
+      languageSelect.id = "ui-language";
+      languageSelect.className = "language-select";
+      for (const [value, label] of [
+        ["auto", t(locale, "languageAuto")],
+        ["zh-CN", t(locale, "languageChinese")],
+        ["en", t(locale, "languageEnglish")],
+      ]) {
+        const option = element(document, "option", label) as HTMLOptionElement;
+        option.value = value;
+        languageSelect.append(option);
+      }
+      languageSelect.value = languagePreference;
+      languageSelect.addEventListener("change", () => void controller.updateLanguage(languageSelect.value as LanguagePreference));
+      const languageControls = element(document, "div");
+      languageControls.className = "settings-controls";
+      languageControls.append(languageLabel, languageSelect);
+      languageCard.append(languageControls);
+      workspace.append(languageCard);
       const card = element(document, "section");
       card.className = "settings-card";
-      card.append(element(document, "h2", "已完成记录保留期限"));
-      card.append(element(document, "p", "已完成是近期历史，方便搜索和再次导出。收件箱记录不会被自动清理。"));
+      card.append(element(document, "h2", t(locale, "historyRetention")));
+      card.append(element(document, "p", t(locale, "historyExplanation")));
       if (!historySettings) {
-        card.append(element(document, "p", "暂时无法读取当前保留期限，请重试。"));
-        const retry = element(document, "button", "重试读取") as HTMLButtonElement;
+        card.append(element(document, "p", t(locale, "retentionUnavailable")));
+        const retry = element(document, "button", t(locale, "retryRead")) as HTMLButtonElement;
         retry.type = "button";
         retry.addEventListener("click", () => void controller.openSettings());
         card.append(retry);
       } else {
-        const label = element(document, "label", "自动清理") as HTMLLabelElement;
+        const label = element(document, "label", t(locale, "autoCleanup")) as HTMLLabelElement;
         label.htmlFor = "history-retention";
         const select = element(document, "select") as HTMLSelectElement;
         select.id = "history-retention";
         select.className = "retention-select";
-        for (const [value, title] of [["forever", "永久保留"], ["30", "保留 30 天"], ["90", "保留 90 天"]]) {
+        for (const [value, title] of [["forever", t(locale, "forever")], ["30", t(locale, "keep30")], ["90", t(locale, "keep90")]]) {
           const option = element(document, "option", title) as HTMLOptionElement;
           option.value = value;
           select.append(option);
         }
-        select.value = historySettings.days === null ? "forever" : String(historySettings.days);
-        const save = element(document, "button", "保存设置") as HTMLButtonElement;
+        select.value = retentionDraft ?? (historySettings.days === null ? "forever" : String(historySettings.days));
+        select.addEventListener("change", () => {
+          retentionDraft = select.value as "forever" | "30" | "90";
+        });
+        const save = element(document, "button", t(locale, "saveSettings")) as HTMLButtonElement;
         save.type = "button";
         save.className = "retention-save";
         save.addEventListener("click", () => void controller.updateHistorySettings(select.value === "forever" ? null : select.value === "30" ? 30 : 90));
@@ -240,8 +286,8 @@ export function createQueueController({ root, messageClient, download = download
         controls.className = "settings-controls";
         controls.append(label, select, save);
         card.append(controls);
-        card.append(element(document, "p", "选择 30 天或 90 天后，已完成记录会在下次打开队列时检查并清理；启用时已有的记录至少再保留所选期限。重新导出会从最近导出时间重新计算。"));
-        card.append(element(document, "p", "扩展只能确认下载已发起，无法确认文件已经保存。自动清理前请确认重要文章的导出文件可用。"));
+        card.append(element(document, "p", t(locale, "retentionDetails")));
+        card.append(element(document, "p", t(locale, "retentionCaution")));
       }
       workspace.append(card);
       layout.append(rail, workspace);
@@ -255,8 +301,8 @@ export function createQueueController({ root, messageClient, download = download
     const search = element(document, "input") as HTMLInputElement;
     search.type = "search";
     search.className = "queue-search";
-    search.placeholder = "搜索标题、来源或备注";
-    search.setAttribute("aria-label", "搜索采集记录");
+    search.placeholder = t(locale, "searchPlaceholder");
+    search.setAttribute("aria-label", t(locale, "searchAria"));
     search.value = searchQuery;
     const applySearch = () => {
       const caret = search.selectionStart;
@@ -274,7 +320,7 @@ export function createQueueController({ root, messageClient, download = download
       applySearch();
     });
     search.addEventListener("compositionend", applySearch);
-    const exportAll = element(document, "button", activeView === "completed" ? "再次导出全部 ZIP" : "导出全部 ZIP") as HTMLButtonElement;
+    const exportAll = element(document, "button", t(locale, activeView === "completed" ? "exportAllAgain" : "exportAll")) as HTMLButtonElement;
     exportAll.type = "button";
     exportAll.className = "queue-export-action";
     exportAll.disabled = visible.length === 0;
@@ -291,25 +337,25 @@ export function createQueueController({ root, messageClient, download = download
     const selectionBar = element(document, "div");
     selectionBar.className = "queue-selection-bar";
     const selectedVisible = visible.filter((record) => selected.has(record.id)).length;
-    const selectionLabel = element(document, "span", `已选 ${selectedVisible} / ${visible.length} 条`);
+    const selectionLabel = element(document, "span", t(locale, "selectedCount", { selected: selectedVisible, total: visible.length }));
     selectionLabel.className = "selection-count";
-    const selectAll = element(document, "button", "全选当前结果") as HTMLButtonElement;
+    const selectAll = element(document, "button", t(locale, "selectAll")) as HTMLButtonElement;
     selectAll.type = "button";
     selectAll.disabled = visible.length === 0;
     selectAll.addEventListener("click", () => {
       visible.forEach((record) => selected.add(record.id));
       render();
     });
-    const clear = element(document, "button", "清空选择") as HTMLButtonElement;
+    const clear = element(document, "button", t(locale, "clearSelection")) as HTMLButtonElement;
     clear.type = "button";
     clear.disabled = selectedVisible === 0;
     clear.addEventListener("click", () => { selected.clear(); render(); });
-    const exportSelectedZip = element(document, "button", activeView === "completed" ? "再次导出所选 ZIP" : "导出所选 ZIP") as HTMLButtonElement;
+    const exportSelectedZip = element(document, "button", t(locale, activeView === "completed" ? "exportSelectedZipAgain" : "exportSelectedZip")) as HTMLButtonElement;
     exportSelectedZip.type = "button";
     exportSelectedZip.className = "selection-primary";
     exportSelectedZip.disabled = selectedVisible === 0;
     exportSelectedZip.addEventListener("click", () => void controller.exportSelectedZip());
-    const exportSelectedJson = element(document, "button", activeView === "completed" ? "再次导出所选 JSON" : "导出所选 JSON") as HTMLButtonElement;
+    const exportSelectedJson = element(document, "button", t(locale, activeView === "completed" ? "exportSelectedJsonAgain" : "exportSelectedJson")) as HTMLButtonElement;
     exportSelectedJson.type = "button";
     exportSelectedJson.disabled = selectedVisible === 0;
     exportSelectedJson.addEventListener("click", () => void controller.exportSelected());
@@ -321,8 +367,8 @@ export function createQueueController({ root, messageClient, download = download
     const list = element(document, "div");
     list.className = "capture-list";
     if (visible.length === 0) {
-      const empty = element(document, "p", searchQuery ? "没有匹配的文章。" : activeView === "inbox"
-        ? "收件箱为空，打开插件采集文章后会显示在这里。" : "还没有已完成的文章。");
+      const empty = element(document, "p", searchQuery ? t(locale, "noMatches") : activeView === "inbox"
+        ? t(locale, "emptyInbox") : t(locale, "emptyCompleted"));
       empty.className = "queue-empty";
       list.append(empty);
     }
@@ -347,7 +393,7 @@ export function createQueueController({ root, messageClient, download = download
       const selection = element(document, "input") as HTMLInputElement;
       selection.type = "checkbox";
       selection.checked = selected.has(record.id);
-      selection.setAttribute("aria-label", `选择 ${record.source.title}`);
+      selection.setAttribute("aria-label", t(locale, "selectRecord", { title: record.source.title }));
       selection.addEventListener("change", () => {
         if (selection.checked) selected.add(record.id);
         else selected.delete(record.id);
@@ -364,11 +410,11 @@ export function createQueueController({ root, messageClient, download = download
       const summary = element(
         document,
         "p",
-        `${hostname(record.source.originalUrl)} · ${record.completedAt ? completionLabel(record.completedAt) : record.capture.capturedAt.slice(0, 10)} · ${record.content.wordCount} 字`,
+        `${hostname(record.source.originalUrl)} · ${record.completedAt ? completionLabel(record.completedAt, locale) : captureDateLabel(record.capture.capturedAt, locale)} · ${t(locale, "words", { count: record.content.wordCount })}`,
       );
       summary.className = "capture-meta";
       main.append(heading, summary);
-      row.append(selection, captureIndex, main, statusPill(document, record.delivery.status, Boolean(record.completedAt)));
+      row.append(selection, captureIndex, main, statusPill(document, record.delivery.status, Boolean(record.completedAt), locale));
       if (record.id === activeRecordId) row.classList.add("is-active");
       list.append(row);
     }
@@ -379,33 +425,33 @@ export function createQueueController({ root, messageClient, download = download
     if (activeRecord) {
       const detailHeader = element(document, "div");
       detailHeader.className = "detail-header";
-      detailHeader.append(element(document, "span", activeRecord.completedAt ? "历史记录" : "文章详情"));
+      detailHeader.append(element(document, "span", t(locale, activeRecord.completedAt ? "historyRecord" : "articleDetails")));
       detailHeader.append(element(document, "h2", activeRecord.source.title));
-      detailHeader.append(element(document, "p", `${hostname(activeRecord.source.originalUrl)} · ${activeRecord.capture.capturedAt.slice(0, 10)} · ${activeRecord.content.wordCount} 字`));
+      detailHeader.append(element(document, "p", `${hostname(activeRecord.source.originalUrl)} · ${captureDateLabel(activeRecord.capture.capturedAt, locale)} · ${t(locale, "words", { count: activeRecord.content.wordCount })}`));
       if (activeRecord.completedAt) {
-        const completed = element(document, "p", completionLabel(activeRecord.completedAt));
+        const completed = element(document, "p", completionLabel(activeRecord.completedAt, locale));
         completed.className = "detail-completed-at";
         detailHeader.append(completed);
       }
       const actions = element(document, "div");
       actions.className = "detail-actions";
-      const open = element(document, "button", "打开来源") as HTMLButtonElement;
+      const open = element(document, "button", t(locale, "openSource")) as HTMLButtonElement;
       open.type = "button";
       open.addEventListener("click", () => void controller.openSource(activeRecord.id));
-      const exportOne = element(document, "button", activeView === "completed" ? "再次导出 Markdown" : "导出 Markdown") as HTMLButtonElement;
+      const exportOne = element(document, "button", t(locale, activeView === "completed" ? "exportMarkdownAgain" : "exportMarkdown")) as HTMLButtonElement;
       exportOne.type = "button";
       exportOne.className = "detail-export";
       exportOne.addEventListener("click", () => void controller.exportOne(activeRecord.id));
       actions.append(open, exportOne);
       const excerpt = element(document, "section");
       excerpt.className = "detail-excerpt";
-      excerpt.append(element(document, "h3", "内容预览"), element(document, "p", textExcerpt(activeRecord) || "暂无摘要"));
+      excerpt.append(element(document, "h3", t(locale, "contentPreview")), element(document, "p", textExcerpt(activeRecord) || t(locale, "noExcerpt")));
       const noteSection = element(document, "section");
       noteSection.className = "detail-note";
       const noteHeader = element(document, "div");
       noteHeader.className = "detail-section-header";
-      noteHeader.append(element(document, "h3", "备注"));
-      const editNote = element(document, "button", activeRecord.user.note ? "编辑" : "添加备注") as HTMLButtonElement;
+      noteHeader.append(element(document, "h3", t(locale, "note")));
+      const editNote = element(document, "button", t(locale, activeRecord.user.note ? "edit" : "addNote")) as HTMLButtonElement;
       editNote.type = "button";
       editNote.className = "note-edit-action";
       editNote.addEventListener("click", () => { noteEditing = true; render(); });
@@ -415,25 +461,25 @@ export function createQueueController({ root, messageClient, download = download
         const note = element(document, "textarea") as HTMLTextAreaElement;
         note.value = activeRecord.user.note ?? "";
         note.maxLength = 280;
-        note.placeholder = "备注（可选）";
-        note.setAttribute("aria-label", `${activeRecord.source.title} 的备注`);
-        const save = element(document, "button", "保存备注") as HTMLButtonElement;
+        note.placeholder = t(locale, "noteOptional");
+        note.setAttribute("aria-label", t(locale, "noteAria", { title: activeRecord.source.title }));
+        const save = element(document, "button", t(locale, "saveNote")) as HTMLButtonElement;
         save.type = "button";
         save.addEventListener("click", () => void controller.updateNote(activeRecord.id, note.value));
         noteSection.append(note, save);
       } else if (activeRecord.user.note) {
         noteSection.append(element(document, "p", activeRecord.user.note));
       }
-      const remove = element(document, "button", "删除") as HTMLButtonElement;
+      const remove = element(document, "button", t(locale, "delete")) as HTMLButtonElement;
       remove.type = "button";
       remove.className = "danger-action";
       remove.addEventListener("click", () => {
-        if (!document.defaultView?.confirm(`确定删除“${activeRecord.source.title}”吗？此操作无法撤销。`)) return;
+        if (!document.defaultView?.confirm(t(locale, "deleteConfirm", { title: activeRecord.source.title }))) return;
         void controller.remove(activeRecord.id);
       });
       detail.append(detailHeader, actions, excerpt, noteSection, remove);
     } else {
-      detail.append(element(document, "p", "选择一篇文章查看详情。"));
+      detail.append(element(document, "p", t(locale, "selectArticle")));
     }
     content.append(detail);
     workspace.append(content);
@@ -445,22 +491,27 @@ export function createQueueController({ root, messageClient, download = download
   const controller: QueueController = {
     async load() {
       notice = "";
-      root.replaceChildren(element(root.ownerDocument, "p", "正在读取本地采集队列…"));
+      if (languageStore) {
+        languagePreference = await languageStore.get().catch(() => "auto" as const);
+        locale = resolveLocale(languagePreference, browserLanguage);
+      }
+      root.ownerDocument.documentElement.lang = locale;
+      root.replaceChildren(element(root.ownerDocument, "p", t(locale, "readingQueue")));
       try {
         const response = await messageClient.send({ type: "LIST_CAPTURES" });
         if (!response.ok || response.type !== "CAPTURES") {
-          notice = responseMessage(response);
+          notice = responseMessage(response, locale);
           records = [];
           render();
           return;
         }
         records = response.records;
-        notice = response.cleanupWarning ?? "";
+        notice = response.cleanupWarning ? t(locale, "cleanupFailed") : "";
         selected.clear();
         activeRecordId = undefined;
         render();
       } catch {
-        notice = "读取本地采集队列失败，请稍后重试。";
+        notice = t(locale, "queueReadFailed");
         records = [];
         render();
       }
@@ -485,20 +536,40 @@ export function createQueueController({ root, messageClient, download = download
     async openSettings() {
       activeView = "settings";
       historySettings = undefined;
+      retentionDraft = undefined;
       notice = "";
       try {
         const response = await messageClient.send({ type: "GET_HISTORY_SETTINGS" });
         if (!response.ok || response.type !== "HISTORY_SETTINGS") throw new Error("Settings unavailable.");
         historySettings = response.settings;
+        retentionDraft = response.settings.days === null ? "forever" : String(response.settings.days) as "30" | "90";
       } catch {
-        notice = "读取设置失败，请稍后重试。";
+        notice = t(locale, "settingsReadFailed");
       }
       render();
     },
 
+    async updateLanguage(value) {
+      if (savingLanguage) return;
+      savingLanguage = true;
+      const select = root.querySelector<HTMLSelectElement>(".language-select");
+      if (select) select.disabled = true;
+      try {
+        await languageStore?.set(value);
+        languagePreference = value;
+        locale = resolveLocale(value, browserLanguage);
+        notice = "";
+      } catch {
+        notice = t(locale, "languageSaveFailed");
+      } finally {
+        savingLanguage = false;
+        render();
+      }
+    },
+
     async updateHistorySettings(days) {
       if (!historySettings) {
-        notice = "读取当前设置后才能保存，请重试。";
+        notice = t(locale, "settingsReadFirst");
         render();
         return;
       }
@@ -510,9 +581,10 @@ export function createQueueController({ root, messageClient, download = download
         const response = await messageClient.send({ type: "UPDATE_HISTORY_SETTINGS", days });
         if (!response.ok || response.type !== "HISTORY_SETTINGS") throw new Error("Settings could not be saved.");
         historySettings = response.settings;
-        notice = "设置已保存。";
+        retentionDraft = response.settings.days === null ? "forever" : String(response.settings.days) as "30" | "90";
+        notice = t(locale, "settingsSaved");
       } catch {
-        notice = "保存设置失败，请稍后重试。";
+        notice = t(locale, "settingsSaveFailed");
       } finally {
         savingHistorySettings = false;
         render();
@@ -523,15 +595,15 @@ export function createQueueController({ root, messageClient, download = download
       try {
         const response = await messageClient.send({ type: "UPDATE_CAPTURE_NOTE", id, note: note.slice(0, 280) });
         if (!response.ok || response.type !== "RECORD") {
-          notice = responseMessage(response);
+          notice = responseMessage(response, locale);
           render();
           return;
         }
         records = records.map((record) => (record.id === id ? response.record : record));
         noteEditing = false;
-        notice = "备注已保存。";
+        notice = t(locale, "noteSaved");
       } catch {
-        notice = "保存备注失败，请稍后重试。";
+        notice = t(locale, "noteSaveFailed");
       }
       render();
     },
@@ -540,15 +612,15 @@ export function createQueueController({ root, messageClient, download = download
       try {
         const response = await messageClient.send({ type: "DELETE_CAPTURE", id });
         if (!response.ok || response.type !== "CAPTURES") {
-          notice = responseMessage(response);
+          notice = responseMessage(response, locale);
           render();
           return;
         }
         records = response.records;
         selected.delete(id);
-        notice = "采集记录已删除。";
+        notice = t(locale, "recordDeleted");
       } catch {
-        notice = "删除采集记录失败，请稍后重试。";
+        notice = t(locale, "deleteFailed");
       }
       render();
     },
@@ -557,15 +629,15 @@ export function createQueueController({ root, messageClient, download = download
       try {
         const response = await messageClient.send({ type: "PROMOTE_DUPLICATE", id });
         if (!response.ok || response.type !== "RECORD") {
-          notice = responseMessage(response);
+          notice = responseMessage(response, locale);
           render();
           return;
         }
         records = records.map((record) => (record.id === id ? response.record : record));
         selected.add(id);
-        notice = "已提升为独立记录。";
+        notice = t(locale, "duplicatePromoted");
       } catch {
-        notice = "提升重复候选失败，请稍后重试。";
+        notice = t(locale, "promoteFailed");
       }
       render();
     },
@@ -576,10 +648,10 @@ export function createQueueController({ root, messageClient, download = download
       try {
         const response = await messageClient.send({ type: "OPEN_SOURCE", url: record.source.originalUrl });
         notice = response.ok && response.type === "OPENED"
-          ? "页面打开后，请在该标签页再次点击插件进行采集。"
-          : responseMessage(response);
+          ? t(locale, "sourceOpened")
+          : responseMessage(response, locale);
       } catch {
-        notice = "打开来源失败，请稍后重试。";
+        notice = t(locale, "sourceOpenFailed");
       }
       render();
     },
@@ -587,7 +659,7 @@ export function createQueueController({ root, messageClient, download = download
     async exportOne(id) {
       const record = recordFor(id);
       if (!record) return;
-      await finishExport([record], recordToMarkdown(record), `ocf-capture-${record.id}.md`, "text/markdown");
+      await finishExport([record], recordToMarkdown(record, locale), `ocf-capture-${record.id}.md`, "text/markdown");
     },
 
     async exportSelected() {
@@ -598,21 +670,21 @@ export function createQueueController({ root, messageClient, download = download
     async exportSelectedZip() {
       const exportable = visibleRecords().filter((record) => selected.has(record.id));
       if (exportable.length === 0) {
-        notice = "没有可导出的已选记录。";
+        notice = t(locale, "noSelectedExport");
         render();
         return;
       }
-      await finishExport(exportable, recordsToZip(exportable), "ocf-captures.zip", "application/zip");
+      await finishExport(exportable, recordsToZip(exportable, locale), "ocf-captures.zip", "application/zip");
     },
 
     async exportAllZip() {
       const exportable = visibleRecords();
       if (exportable.length === 0) {
-        notice = "当前视图没有可导出的记录。";
+        notice = t(locale, "noCurrentExport");
         render();
         return;
       }
-      await finishExport(exportable, recordsToZip(exportable), "ocf-captures.zip", "application/zip");
+      await finishExport(exportable, recordsToZip(exportable, locale), "ocf-captures.zip", "application/zip");
     },
   };
 
@@ -621,5 +693,8 @@ export function createQueueController({ root, messageClient, download = download
 
 const root = typeof document === "undefined" ? undefined : document.querySelector<HTMLElement>("#root");
 if (root) {
-  void createQueueController({ root, messageClient: new ChromeMessageClient() }).load();
+  void createQueueController({
+    root, messageClient: new ChromeMessageClient(),
+    languageStore: new ChromeLanguageStore(), browserLanguage: chrome.i18n.getUILanguage(),
+  }).load();
 }

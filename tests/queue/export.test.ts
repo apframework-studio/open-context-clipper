@@ -28,6 +28,20 @@ const record: CaptureRecord = {
 };
 
 describe("queue exports", () => {
+  it("exports English metadata while preserving article text and JSON keys", () => {
+    const markdown = recordToMarkdown(record, "en");
+    expect(markdown).toContain("- Source: https://example.com/article");
+    expect(markdown).toContain("- Captured at: 2026-09-19T08:00:00.000Z");
+    expect(markdown).toContain("- Author: 测试作者");
+    expect(markdown).toContain("- Note: 留作参考");
+    expect(markdown).toContain(record.content.markdown);
+
+    const files = unzipSync(recordsToZip([record], "en"));
+    const article = strFromU8(files[Object.keys(files).find((path) => path.endsWith(".md"))!]!);
+    expect(article).toContain("- Source: https://example.com/article");
+    expect(JSON.parse(strFromU8(files["captures.json"]!))[0].source.originalUrl).toBe(record.source.originalUrl);
+  });
+
   it("exports a capture with its source metadata and remote image link intact", () => {
     const markdown = recordToMarkdown(record);
 

@@ -23,6 +23,21 @@ function readPngDimensions(file: string): { width: number; height: number } {
 }
 
 describe("extension build", () => {
+  it("packages both Chrome locale catalogs for localized extension metadata", () => {
+    const manifest = JSON.parse(readFileSync(resolve(dist, "manifest.json"), "utf8"));
+    expect(manifest.default_locale).toBe("en");
+    expect(manifest.description).toBe("__MSG_extensionDescription__");
+    for (const [locale, description] of [
+      ["en", "Capture web articles into a local Markdown queue."],
+      ["zh_CN", "本地离线采集当前网页正文。"],
+      ["zh_TW", "本地离线采集当前网页正文。"],
+    ]) {
+      const catalog = JSON.parse(readFileSync(resolve(dist, "_locales", locale, "messages.json"), "utf8"));
+      expect(catalog.extensionDescription.message).toBe(description);
+      expect(catalog.captureCurrentArticle.message).toBeTruthy();
+    }
+  });
+
   it("emits a loadable MV3 manifest and every declared entrypoint", () => {
     expect(existsSync(resolve(dist, "manifest.json"))).toBe(true);
     const manifest = JSON.parse(readFileSync(resolve(dist, "manifest.json"), "utf8"));
@@ -39,7 +54,7 @@ describe("extension build", () => {
     const queueHtml = readFileSync(resolve(dist, "queue.html"), "utf8");
 
     expect(queueHtml).toContain('rel="stylesheet" href="/queue.css"');
-    expect(queueHtml).toContain("<title>Open Context Clipper · 采集队列</title>");
+    expect(queueHtml).toContain("<title>Open Context Clipper</title>");
   });
 
   it("emits branded extension icons at every declared Chrome size", () => {

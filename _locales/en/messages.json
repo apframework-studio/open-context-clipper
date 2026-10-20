@@ -1,0 +1,4 @@
+{
+  "extensionDescription": { "message": "Capture web articles into a local Markdown queue." },
+  "captureCurrentArticle": { "message": "Capture this article" }
+}

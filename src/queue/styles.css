@@ -80,7 +80,7 @@ p, h1, h2, h3 { margin-top: 0; }
 .settings-card p { color: #62758f; line-height: 1.7; }
 .settings-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 26px 0; }
 .settings-controls label { min-width: 75px; color: #345474; font-weight: 700; }
-.retention-select { min-width: 210px; min-height: 42px; padding: 8px 12px; border: 1px solid #d6e1ee; border-radius: 9px; color: #1c3455; background: white; }
+.retention-select, .language-select { min-width: 210px; min-height: 42px; padding: 8px 12px; border: 1px solid #d6e1ee; border-radius: 9px; color: #1c3455; background: white; }
 .retention-save { color: white; background: #2459af; }
 .retention-save:hover { background: #1d488e; }
 @media (max-width: 1000px) { .queue-content { grid-template-columns: minmax(0, 1fr); } }

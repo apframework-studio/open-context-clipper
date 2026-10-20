@@ -89,6 +89,73 @@ function createRoot(): HTMLElement {
 }
 
 describe("local queue controller", () => {
+  it("uses the saved language on reload and switches the visible queue immediately", async () => {
+    let saved: "auto" | "zh-CN" | "en" = "auto";
+    const languageStore = {
+      async get() { return saved; },
+      async set(value: "auto" | "zh-CN" | "en") { saved = value; },
+    };
+    const root = createRoot();
+    const controller = createQueueController({ root, messageClient: new FakeMessageClient(), download: () => undefined, languageStore, browserLanguage: "en-US" });
+    await controller.load();
+    expect(root.querySelector(".queue-hero h1")?.textContent).toBe("Inbox");
+    await controller.openSettings();
+    const languageSelect = root.querySelector<HTMLSelectElement>(".language-select")!;
+    expect(languageSelect.value).toBe("auto");
+    languageSelect.value = "zh-CN";
+    languageSelect.dispatchEvent(new root.ownerDocument.defaultView!.Event("change", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(root.querySelector(".queue-hero h1")?.textContent).toBe("设置");
+    expect(root.querySelector<HTMLSelectElement>(".language-select")?.value).toBe("zh-CN");
+    expect(root.ownerDocument.documentElement.lang).toBe("zh-CN");
+
+    const reloaded = createRoot();
+    await createQueueController({ root: reloaded, messageClient: new FakeMessageClient(), download: () => undefined, languageStore, browserLanguage: "en-US" }).load();
+    expect(reloaded.querySelector(".queue-hero h1")?.textContent).toBe("收件箱");
+  });
+
+  it("keeps an unsaved retention choice when the language changes", async () => {
+    const root = createRoot();
+    const controller = createQueueController({ root, messageClient: new FakeMessageClient(), download: () => undefined, browserLanguage: "en-US" });
+    await controller.load();
+    await controller.openSettings();
+    const retention = root.querySelector<HTMLSelectElement>(".retention-select")!;
+    retention.value = "30";
+    retention.dispatchEvent(new root.ownerDocument.defaultView!.Event("change", { bubbles: true }));
+
+    await controller.updateLanguage("en");
+
+    expect(root.querySelector<HTMLSelectElement>(".retention-select")?.value).toBe("30");
+    expect(root.querySelector(".queue-hero h1")?.textContent).toBe("Settings");
+  });
+
+  it("keeps an English completed view and its settings readable", async () => {
+    const root = createRoot();
+    const client = new FakeMessageClient();
+    client.records = [{ ...queued, completedAt: "2026-10-18T10:00:00.000Z" }];
+    const controller = createQueueController({ root, messageClient: client, download: () => undefined, locale: "en" });
+    await controller.load();
+    controller.view("completed");
+    expect(root.querySelector(".queue-hero h1")?.textContent).toBe("Completed");
+    expect(root.querySelector(".queue-toolbar")?.textContent).toContain("Export all again");
+    expect(root.querySelector(".capture-meta")?.textContent).toContain("Completed on");
+    await controller.openSettings();
+    expect(root.textContent).toContain("Language");
+    expect(root.textContent).toContain("History retention");
+    expect(root.textContent).not.toContain("已完成记录保留期限");
+  });
+
+  it("formats captured dates for the selected language without changing stored timestamps", async () => {
+    const root = createRoot();
+    const client = new FakeMessageClient();
+    const controller = createQueueController({ root, messageClient: client, download: () => undefined, locale: "en" });
+    await controller.load();
+
+    expect(root.querySelector(".capture-meta")?.textContent).toContain("09/19/2026");
+    expect(root.querySelector(".queue-detail .detail-header")?.textContent).toContain("09/19/2026");
+    expect(client.records[0]?.capture.capturedAt).toBe("2026-09-19T08:00:00.000Z");
+  });
+
   it("filters records by status without treating an opened source as a silent re-capture", async () => {
     const root = createRoot();
     const client = new FakeMessageClient();

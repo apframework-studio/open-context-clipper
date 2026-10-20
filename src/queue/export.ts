@@ -1,12 +1,14 @@
 import type { CaptureRecord } from "../shared/models";
 import { strToU8, zipSync } from "fflate";
+import { t, type Locale } from "../shared/i18n";
 
-export function recordToMarkdown(record: CaptureRecord): string {
+export function recordToMarkdown(record: CaptureRecord, locale: Locale = "zh-CN"): string {
+  const separator = locale === "en" ? ": " : "：";
   const metadata = [
-    `- 来源：${record.source.originalUrl}`,
-    `- 采集时间：${record.capture.capturedAt}`,
-    ...(record.source.author ? [`- 作者：${record.source.author}`] : []),
-    ...(record.user.note ? [`- 备注：${record.user.note}`] : []),
+    `- ${t(locale, "exportSource")}${separator}${record.source.originalUrl}`,
+    `- ${t(locale, "exportCapturedAt")}${separator}${record.capture.capturedAt}`,
+    ...(record.source.author ? [`- ${t(locale, "exportAuthor")}${separator}${record.source.author}`] : []),
+    ...(record.user.note ? [`- ${t(locale, "exportNote")}${separator}${record.user.note}`] : []),
   ];
 
   return [`# ${record.source.title}`, "", ...metadata, "", "---", "", record.content.markdown].join("\n");
@@ -27,14 +29,14 @@ function safeFilename(value: string): string {
     .replace(/[. ]+$/g, "") || "article";
 }
 
-export function recordsToZip(records: CaptureRecord[]): Uint8Array {
+export function recordsToZip(records: CaptureRecord[], locale: Locale = "zh-CN"): Uint8Array {
   const files: Record<string, Uint8Array> = {
     "captures.json": strToU8(recordsToJson(records)),
   };
   for (const record of records) {
     const title = safeFilename(record.source.title);
     const id = safeFilename(record.id);
-    files[`articles/${title}-${id}.md`] = strToU8(recordToMarkdown(record));
+    files[`articles/${title}-${id}.md`] = strToU8(recordToMarkdown(record, locale));
   }
   return zipSync(files, { level: 6 });
 }

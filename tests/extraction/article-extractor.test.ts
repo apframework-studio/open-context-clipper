@@ -43,7 +43,7 @@ describe("extractCaptureFromDocument", () => {
 
       expect(result.content.markdown).toContain("visible article preview");
       expect(result.capture.warnings).not.toContain("content_too_short");
-      expect(result.capture.warnings.some((warning) => /登录|订阅|付费/.test(warning) && /预览|完整/.test(warning))).toBe(true);
+      expect(result.capture.warnings).toContain("paywall_preview");
     },
   );
 

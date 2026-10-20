@@ -20,6 +20,7 @@ await mkdir("dist/icons", { recursive: true });
 await Promise.all(
   ["manifest.json", "popup.html", "queue.html"].map((file) => cp(file, `dist/${file}`))
 );
+await cp("_locales", "dist/_locales", { recursive: true });
 await Promise.all(
   [16, 32, 48, 128].map((size) =>
     cp(`icons/icon-${size}.png`, `dist/icons/icon-${size}.png`)

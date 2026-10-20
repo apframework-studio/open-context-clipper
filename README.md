@@ -1,75 +1,82 @@
-# Open Context Clipper · 文脉采集器
+# Open Context Clipper
 
-**把网页文章，带回自己的本地知识库。**
+Language: **English** · [简体中文](README.zh-CN.md)
 
-Open Context Clipper 是一款开源 Chrome 扩展。打开文章后点击扩展，先预览识别出的正文，再决定是否保存；需要时把文章导出为 Markdown，放进自己的文件夹或 Markdown 知识库。文章的提取、转换和队列保存都在浏览器本机完成，无需注册账号，也不需要运行后端服务。
+**Bring web articles into your own local knowledge base.**
 
-> 当前版本通过 Chrome 的“加载已解压的扩展程序”安装，尚未发布到 Chrome Web Store。
+Open Context Clipper is an open source Chrome extension for capturing the article you are reading. Preview the extracted text, decide whether to save it, then export clean Markdown for your notes, files, or other local knowledge tools. Extraction and queue storage happen on your device. No account or server is required.
 
-## 从网页到本地 Markdown
+## From the web to local Markdown
 
-| 1. 主动采集 | 2. 集中管理 | 3. 自由导出 |
+| 1. Capture deliberately | 2. Manage locally | 3. Export freely |
 | --- | --- | --- |
-| 点击扩展后预览标题、来源、正文片段等信息，确认后才保存。 | 文章进入本地队列；可搜索、查看详情、添加备注和批量选择。 | 单篇下载 Markdown，多篇打包为 ZIP，也可导出所选记录的 JSON。 |
+| Preview the title, source, and extracted text. Nothing is saved until you confirm. | Search your local queue, inspect articles, add notes, and select multiple captures. | Download Markdown, bundle articles into a ZIP, or export selected records as JSON. |
 
-### 先看预览，再保存
+### Preview before saving
 
-在当前文章页点击扩展图标。弹窗会显示识别结果和正文预览；点击“保存到采集队列”后，文章才会进入本地队列。关闭弹窗不会保存。
+Click the extension on an article page to inspect the extracted content and any warnings. Choose **Save to queue** only when the preview looks right. Closing the popup saves nothing.
 
 <p align="center">
-  <img src="docs/images/capture-preview.png" alt="采集预览弹窗：核对文章内容后保存到采集队列" width="300">
+  <img src="docs/images/capture-preview.png" alt="Capture preview before saving an article to the queue" width="300">
 </p>
 
-### 在浏览器窗口管理文章
+### Manage articles in a full browser tab
 
-点击“打开队列”，即可搜索已采集的文章、查看详情、重新打开来源，或按需导出。“收件箱”放待导出的内容；下载开始后，记录进入“已完成”，方便近期查找和再次导出。列表支持批量选择，当前搜索结果也可以直接导出为 ZIP。
+Choose **Open queue** to search your captures, inspect details, reopen a source, or export on demand. Articles waiting for export stay in **Inbox**. Once a download starts, they move to **Completed**, where you can find and export them again. Select several articles or export the current search results as a ZIP.
 
-![满屏本地队列：搜索、查看详情和批量导出已采集文章](docs/images/local-queue.png)
+![Full-page local queue for searching, reviewing, and exporting articles](docs/images/local-queue.png)
 
-### 导出后，继续用你熟悉的工具阅读
+### Read and organize with your own tools
 
-导出的 Markdown 保留文章标题、来源链接、采集时间、作者（如有）、备注（如有）和正文。它是普通文本文件，可以用 Typora 等 Markdown 编辑器打开，也可以放入自己的本地知识库目录，继续整理、检索或备份。
+Exported Markdown includes the article title, source URL, capture time, author and note when present, and extracted body. Open it in Typora or another Markdown editor, or add it to your local knowledge base for further organization and backup.
 
-![导出的 Markdown 在 Typora 中打开](docs/images/markdown-in-typora.png)
+![An exported Markdown article opened in Typora](docs/images/markdown-in-typora.png)
 
-## 快速开始
+## Install from source
 
-需要桌面版 Google Chrome、Node.js 和 npm。在仓库根目录运行：
+You need desktop Google Chrome, Node.js, and npm. From the repository root:
 
 ```bash
 npm ci
 npm run build
 ```
 
-然后打开 Chrome 的 `chrome://extensions`，开启“开发者模式”，点击“加载已解压的扩展程序”，选择本仓库生成的 `dist/` 目录。源码更新后，再运行 `npm run build`，并在扩展管理页重新加载扩展。
+Open `chrome://extensions`, turn on **Developer mode**, choose **Load unpacked**, and select the generated `dist/` directory. After a source update, rebuild and reload the extension on that page.
 
-## 日常使用
+## Everyday workflow
 
-1. 打开一篇已经加载完成的网页文章，点击工具栏中的 Open Context Clipper。
-2. 核对标题、来源、作者、发布日期、字数、远程图片数量和正文预览；可选填一条备注。
-3. 点击“保存到采集队列”。相同页面且正文未变化时，扩展会提示已有采集记录，避免无意重复保存。
-4. 点击“打开队列”，在收件箱里搜索、查看和选择文章。单篇用“导出 Markdown”；多篇用“导出所选 ZIP”或“导出全部 ZIP”。需要结构化备份时，可导出所选 JSON。
-5. ZIP 中的 `articles/` 目录包含每篇文章的 Markdown，根目录的 `captures.json` 保存对应记录。把 Markdown 文件放进自己的本地知识库，或用喜欢的编辑器直接打开。
+1. Open a fully loaded article and click Open Context Clipper in the Chrome toolbar.
+2. Check the title, source, author, publication date, text length, remote image count, and excerpt. Add an optional note.
+3. Click **Save to queue**. If the same page and content were already captured, the extension tells you instead of silently creating another copy.
+4. In **Inbox**, export one article as Markdown, selected articles as ZIP or JSON, or all current search results as ZIP.
+5. A ZIP contains each article in `articles/` and the corresponding records in `captures.json`. Move the Markdown files into your own folders or knowledge base.
 
-浏览器内部页面（例如 `chrome://`）无法采集，但弹窗里的“打开队列”仍可管理已经保存的文章。对于需要登录的页面，扩展只处理当前标签页**已经渲染出来**的内容，不会代替你登录或绕过付费墙。
+Chrome internal pages such as `chrome://` cannot be captured. The popup still lets you open the queue. On sign-in or paywalled pages, the extension works only with content already rendered in your current tab; review the preview before saving.
 
-## 本地数据与你的控制权
+## Choose a language
 
-- **主动才读取：** 只有点击扩展采集当前标签页时，才会读取该页已渲染的内容；确认保存后才写入队列。不会后台轮询网页。
-- **正文留在本机：** 提取和 Markdown 转换在浏览器内完成，记录保存在扩展自己的 IndexedDB 中；当前版本不会把采集正文上传到项目服务器、Open Context Forge 或其他同步服务。
-- **按需导出：** 只有你点击导出时，扩展才会发起本地文件下载。扩展能确认下载已发起，不能确认文件最终成功保存；重要文章请检查下载结果。
-- **有限权限：** 扩展使用当前标签页的临时访问权限，不读取或保存 cookies、登录凭据与浏览历史。
-- **图片保持链接：** Markdown 保留远程图片 URL，不下载图片文件。之后在 Markdown 编辑器中打开文章时，显示这些图片可能仍需要访问原网站。
+The interface supports Simplified Chinese and English. It follows Chrome's interface language by default; other browser languages use English. Open **Queue → Settings → Language** to choose **Follow browser**, **简体中文**, or **English**. The queue updates immediately, and the popup uses the choice the next time it opens.
 
-“已完成”默认永久保留在本地。你可以在队列的“设置”中改为保留 30 天或 90 天；到期清理只在下次打开队列时执行，不会清理收件箱。删除或自动清理的记录无法在扩展内恢复，建议先确认重要文件已导出。
+Fixed metadata labels in exported Markdown follow the interface language. Article titles, content, and your notes remain unchanged; JSON field names stay stable.
 
-扩展本地数据与安装的扩展 ID 绑定。卸载扩展可能清除队列；从旧安装路径重新加载也可能生成不同 ID，旧队列不会自动迁移。当前没有 JSON 导入功能，因此更换安装方式前请先导出需要保留的内容。
+## Completed history
 
-## 当前范围
+Completed captures are kept locally forever by default. In **Queue → Settings**, you can choose to keep them for 30 or 90 days. Cleanup runs only the next time you open the queue; Inbox captures are never automatically deleted. Re-exporting starts a new retention period from the latest export. Deleted captures cannot be restored in the extension, so check important downloads before enabling cleanup.
 
-本项目专注于把当前网页中已渲染的文章正文转成可带走的 Markdown。遇到尚未加载的内容、登录提示或付费墙预览，识别结果可能不完整；请在保存前查看预览。当前版本不提供云同步、自动抓取、AI 整理或向其他知识库自动写入。
+## Privacy and control
 
-## 开发与验证
+- The extension reads only the already rendered content of the current tab when you click it. It does not poll pages in the background or bypass sign-in and paywalls.
+- Captures stay in the extension's local IndexedDB queue. They are not uploaded to Open Context Forge or a project server.
+- Downloads start only when you choose an export. The extension cannot confirm that the file was ultimately saved, so check important exports before enabling automatic cleanup.
+- It does not read or save cookies, credentials, or browsing history. Markdown keeps links to remote images instead of downloading the image files.
+
+Local queue data belongs to the installed extension ID; uninstalling or loading from a different path may make older data unavailable. There is currently no JSON import. Export captures you want to keep before changing the installation.
+
+## Current scope
+
+The extension converts rendered article text from the current page into portable Markdown. Content that has not loaded, login prompts, and paywall previews can produce incomplete captures. It does not provide cloud sync, automatic scraping, AI organization, or automatic writes to another knowledge base.
+
+## Development
 
 ```bash
 npm test
@@ -77,8 +84,10 @@ npm run typecheck
 npm run build
 ```
 
-自动化检查覆盖采集、队列和导出逻辑；扩展加载与页面交互仍需在真实 Chrome 中验证。过去各阶段的检查记录见[验证历史](docs/verification-history.md)。
+Automated tests cover extraction, queue behavior, and exports. Loading and interacting with the extension still require manual testing in Chrome.
 
-## 开源协议
+Past verification notes are recorded in [verification history](docs/verification-history.md).
 
-本项目采用 [MIT License](LICENSE)，版权归 Shoukai Huang 所有。第三方依赖遵循各自的许可证。
+## License
+
+This project is released under the [MIT License](LICENSE). Copyright © Shoukai Huang. Third-party dependencies retain their own licenses.

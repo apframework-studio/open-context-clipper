@@ -101,7 +101,7 @@ export async function extractCaptureFromDocument(
   const wordCount = countWords(plainText);
   const warnings = readableLength(plainText) < MINIMUM_READABLE_CHARACTERS ? ["content_too_short"] : [];
   if (/this story is for members only|subscribe to read the full story|sign in to (?:read|continue)|订阅后(?:阅读|查看)|登录后(?:阅读|查看)|付费阅读/i.test(plainText)) {
-    warnings.push("检测到登录或付费阅读提示，当前采集可能仅包含预览，正文可能不完整。请确认后保存。");
+    warnings.push("paywall_preview");
   }
 
   return {
