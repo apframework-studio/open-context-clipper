@@ -1,8 +1,10 @@
-import type { CaptureRecord } from "../shared/models";
+import type { CaptureRecord, ExtractedCapture } from "../shared/models";
 import { strToU8, zipSync } from "fflate";
 import { t, type Locale } from "../shared/i18n";
 
-export function recordToMarkdown(record: CaptureRecord, locale: Locale = "zh-CN"): string {
+type MarkdownCapture = ExtractedCapture & { user: { note?: string } };
+
+export function recordToMarkdown(record: MarkdownCapture, locale: Locale = "zh-CN"): string {
   const separator = locale === "en" ? ": " : "：";
   const metadata = [
     `- ${t(locale, "exportSource")}${separator}${record.source.originalUrl}`,
@@ -29,14 +31,26 @@ function safeFilename(value: string): string {
     .replace(/[. ]+$/g, "") || "article";
 }
 
+export function markdownFilename(title: string): string {
+  const name = safeFilename(title);
+  return /\.md$/i.test(name) ? name : `${name}.md`;
+}
+
 export function recordsToZip(records: CaptureRecord[], locale: Locale = "zh-CN"): Uint8Array {
   const files: Record<string, Uint8Array> = {
     "captures.json": strToU8(recordsToJson(records)),
   };
+  const usedNames = new Set<string>();
   for (const record of records) {
-    const title = safeFilename(record.source.title);
-    const id = safeFilename(record.id);
-    files[`articles/${title}-${id}.md`] = strToU8(recordToMarkdown(record, locale));
+    const filename = markdownFilename(record.source.title);
+    const stem = filename.slice(0, -3);
+    let uniqueName = filename;
+    let suffix = 2;
+    while (usedNames.has(uniqueName.toLocaleLowerCase())) {
+      uniqueName = `${stem} (${suffix++}).md`;
+    }
+    usedNames.add(uniqueName.toLocaleLowerCase());
+    files[`articles/${uniqueName}`] = strToU8(recordToMarkdown(record, locale));
   }
   return zipSync(files, { level: 6 });
 }

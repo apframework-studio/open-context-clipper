@@ -89,6 +89,38 @@ function createRoot(): HTMLElement {
 }
 
 describe("local queue controller", () => {
+  it("shows the newest captured inbox article first even when storage returns older records first", async () => {
+    const root = createRoot();
+    const client = new FakeMessageClient();
+    client.records = [
+      { ...queued, id: "older", source: { ...queued.source, title: "旧文章" }, capture: { ...queued.capture, capturedAt: "2026-09-17T08:00:00.000Z" } },
+      { ...queued, id: "newest", source: { ...queued.source, title: "最新文章" }, capture: { ...queued.capture, capturedAt: "2026-09-21T08:00:00.000Z" } },
+      { ...queued, id: "middle", source: { ...queued.source, title: "中间文章" }, capture: { ...queued.capture, capturedAt: "2026-09-19T08:00:00.000Z" } },
+    ];
+    await createQueueController({ root, messageClient: client, download: () => undefined }).load();
+
+    expect([...root.querySelectorAll<HTMLElement>(".capture-row")].map((row) => row.dataset.captureId))
+      .toEqual(["newest", "middle", "older"]);
+    expect(root.querySelector(".queue-detail h2")?.textContent).toBe("最新文章");
+    expect(client.records.map((record) => record.id)).toEqual(["older", "newest", "middle"]);
+  });
+
+  it("shows the most recently completed article first in history", async () => {
+    const root = createRoot();
+    const client = new FakeMessageClient();
+    client.records = [
+      { ...queued, id: "older", completedAt: "2026-10-18T08:00:00.000Z" },
+      { ...queued, id: "newest", completedAt: "2026-10-20T08:00:00.000Z" },
+      { ...queued, id: "middle", completedAt: "2026-10-19T08:00:00.000Z" },
+    ];
+    const controller = createQueueController({ root, messageClient: client, download: () => undefined });
+    await controller.load();
+    controller.view("completed");
+
+    expect([...root.querySelectorAll<HTMLElement>(".capture-row")].map((row) => row.dataset.captureId))
+      .toEqual(["newest", "middle", "older"]);
+  });
+
   it("uses the saved language on reload and switches the visible queue immediately", async () => {
     let saved: "auto" | "zh-CN" | "en" = "auto";
     const languageStore = {
@@ -304,7 +336,7 @@ describe("local queue controller", () => {
     await controller.load();
     await controller.exportOne(queued.id);
 
-    expect(downloads).toEqual([`ocf-capture-${queued.id}.md`]);
+    expect(downloads).toEqual(["待同步文章.md"]);
     expect(client.requests.at(-1)).toEqual({ type: "MARK_CAPTURES_COMPLETE", ids: [queued.id] });
     expect(root.textContent).not.toContain("待同步文章");
     controller.view("completed");

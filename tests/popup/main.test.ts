@@ -69,6 +69,59 @@ function createRoot(): HTMLElement {
 }
 
 describe("popup capture confirmation", () => {
+  it("downloads Markdown from the preview with its note without saving a queue record", async () => {
+    const root = createRoot();
+    const client = createFakeMessageClient();
+    const downloads: Array<{ content: string; filename: string; mimeType: string }> = [];
+    const controller = createPopupController({
+      root,
+      messageClient: client,
+      download: (content, filename, mimeType) => downloads.push({ content, filename, mimeType }),
+    });
+    await controller.load();
+
+    const note = root.querySelector<HTMLInputElement>("#capture-note")!;
+    note.value = "只需要本地文件";
+    root.querySelector<HTMLButtonElement>(".popup-export-action")!.click();
+
+    expect(downloads).toHaveLength(1);
+    expect(downloads[0]?.content).toContain("- 备注：只需要本地文件");
+    expect(downloads[0]?.content).toContain(extracted.content.markdown);
+    expect(downloads[0]?.filename).toBe("-img src=x onerror=alert(1)- 上下文工程.md");
+    expect(downloads[0]?.mimeType).toBe("text/markdown");
+    expect(client.requests).toEqual([{ type: "EXTRACT_ACTIVE_TAB" }]);
+    expect(root.textContent).toContain("未加入队列");
+  });
+
+  it("uses English Markdown labels for a direct export and reports download failures", async () => {
+    const root = createRoot();
+    const client = createFakeMessageClient();
+    let content = "";
+    const controller = createPopupController({
+      root,
+      messageClient: client,
+      locale: "en",
+      download: (value) => { content = value; },
+    });
+    await controller.load();
+    root.querySelector<HTMLButtonElement>(".popup-export-action")!.click();
+
+    expect(content).toContain("- Source: https://medium.example.com/article");
+    expect(root.textContent).toContain("not added to the queue");
+    expect(client.requests).toEqual([{ type: "EXTRACT_ACTIVE_TAB" }]);
+
+    const failedRoot = createRoot();
+    const failedClient = createFakeMessageClient();
+    await createPopupController({
+      root: failedRoot,
+      messageClient: failedClient,
+      download: () => { throw new Error("blocked"); },
+    }).load();
+    failedRoot.querySelector<HTMLButtonElement>(".popup-export-action")!.click();
+    expect(failedRoot.textContent).toContain("下载未能开始");
+    expect(failedClient.requests).toEqual([{ type: "EXTRACT_ACTIVE_TAB" }]);
+  });
+
   it("shows an English preview and translates legacy warning codes without changing the article", async () => {
     const root = createRoot();
     await createPopupController({

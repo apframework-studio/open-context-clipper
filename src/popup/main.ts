@@ -4,6 +4,7 @@ import type { ExtensionRequest, ExtensionResponse } from "../shared/messages";
 import type { ExtractedCapture, SaveOutcome } from "../shared/models";
 import { createTextPreview } from "../shared/preview";
 import { ChromeLanguageStore, errorText, resolveLocale, t, warningText, type Locale } from "../shared/i18n";
+import { downloadFile, markdownFilename, recordToMarkdown } from "../queue/export";
 
 export interface MessageClient {
   send(request: ExtensionRequest): Promise<ExtensionResponse>;
@@ -12,6 +13,7 @@ export interface MessageClient {
 export interface PopupController {
   load(): Promise<void>;
   save(note: string): Promise<void>;
+  exportMarkdown(note: string): void;
   openQueue(): Promise<void>;
 }
 
@@ -19,6 +21,7 @@ type PopupDependencies = {
   root: HTMLElement;
   messageClient: MessageClient;
   locale?: Locale;
+  download?: (content: string, filename: string, mimeType: string) => void;
 };
 
 function element<K extends keyof HTMLElementTagNameMap>(
@@ -88,7 +91,7 @@ class ChromeMessageClient implements MessageClient {
   }
 }
 
-export function createPopupController({ root, messageClient, locale = "zh-CN" }: PopupDependencies): PopupController {
+export function createPopupController({ root, messageClient, locale = "zh-CN", download = downloadFile }: PopupDependencies): PopupController {
   root.ownerDocument.documentElement.lang = locale;
   let extracted: ExtractedCapture | undefined;
   let noteInput: HTMLInputElement | undefined;
@@ -211,7 +214,11 @@ export function createPopupController({ root, messageClient, locale = "zh-CN" }:
     primaryButton.type = "button";
     primaryButton.className = "primary-action";
     primaryButton.addEventListener("click", () => void controller.save(noteInput?.value ?? ""));
-    actions.append(primaryButton, createQueueButton());
+    const exportButton = element(document, "button", t(locale, "exportMarkdown"));
+    exportButton.type = "button";
+    exportButton.className = "secondary-action popup-export-action";
+    exportButton.addEventListener("click", () => controller.exportMarkdown(noteInput?.value ?? ""));
+    actions.append(primaryButton, exportButton, createQueueButton());
     container.append(actions);
     root.replaceChildren(container);
   };
@@ -266,6 +273,20 @@ export function createPopupController({ root, messageClient, locale = "zh-CN" }:
       } catch {
         if (primaryButton) primaryButton.disabled = false;
         renderError(t(locale, "saveFailed"));
+      }
+    },
+
+    exportMarkdown(note) {
+      if (!extracted) {
+        renderError(t(locale, "extractFirst"));
+        return;
+      }
+      try {
+        const markdown = recordToMarkdown({ ...extracted, user: { note: note.slice(0, 280) } }, locale);
+        download(markdown, markdownFilename(extracted.source.title), "text/markdown");
+        renderSuccess(t(locale, "directExportStarted"));
+      } catch {
+        renderError(t(locale, "directExportFailed"));
       }
     },
 

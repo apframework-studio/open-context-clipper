@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { strFromU8, unzipSync } from "fflate";
-import { recordToMarkdown, recordsToJson, recordsToZip } from "../../src/queue/export";
+import { markdownFilename, recordToMarkdown, recordsToJson, recordsToZip } from "../../src/queue/export";
 import type { CaptureRecord } from "../../src/shared/models";
 
 const record: CaptureRecord = {
@@ -28,6 +28,12 @@ const record: CaptureRecord = {
 };
 
 describe("queue exports", () => {
+  it("keeps the page title in a safe Markdown filename", () => {
+    expect(markdownFilename("上下文工程：入门/实践")).toBe("上下文工程-入门-实践.md");
+    expect(markdownFilename("Article.md")).toBe("Article.md");
+    expect(markdownFilename("  ")).toBe("article.md");
+  });
+
   it("exports English metadata while preserving article text and JSON keys", () => {
     const markdown = recordToMarkdown(record, "en");
     expect(markdown).toContain("- Source: https://example.com/article");
@@ -74,11 +80,25 @@ describe("queue exports", () => {
     expect(paths).toHaveLength(3);
     expect(paths).toContain("captures.json");
     expect(paths.every((path) => path === "captures.json" || (path.startsWith("articles/") && !path.slice(9).includes("/")))).toBe(true);
-    expect(paths.some((path) => path.includes("capture-1.md"))).toBe(true);
-    expect(paths.some((path) => path.includes("capture-2.md"))).toBe(true);
+    expect(paths).toContain("articles/测试文章.md");
+    expect(paths.every((path) => !path.includes("capture-"))).toBe(true);
     expect(paths.filter((path) => path.endsWith(".md")).map((path) => strFromU8(files[path]!)).join("\n"))
       .toContain("第二篇正文");
     expect(JSON.parse(strFromU8(files["captures.json"]!)).map((item: CaptureRecord) => item.id))
       .toEqual(["capture-1", "capture-2"]);
+  });
+
+  it("keeps both Markdown files when two ZIP entries have the same title", () => {
+    const second: CaptureRecord = {
+      ...record,
+      id: "capture-2",
+      content: { ...record.content, markdown: "另一篇正文" },
+    };
+    const files = unzipSync(recordsToZip([record, second]));
+
+    expect(Object.keys(files)).toContain("articles/测试文章.md");
+    expect(Object.keys(files)).toContain("articles/测试文章 (2).md");
+    expect(strFromU8(files["articles/测试文章.md"]!)).toContain(record.content.markdown);
+    expect(strFromU8(files["articles/测试文章 (2).md"]!)).toContain("另一篇正文");
   });
 });

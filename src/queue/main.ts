@@ -1,6 +1,6 @@
 import "./styles.css";
 
-import { downloadFile, recordToMarkdown, recordsToJson, recordsToZip } from "./export";
+import { downloadFile, markdownFilename, recordToMarkdown, recordsToJson, recordsToZip } from "./export";
 import type { ExtensionRequest, ExtensionResponse, HistoryRetentionSetting } from "../shared/messages";
 import type { CaptureRecord, DeliveryStatus } from "../shared/models";
 import { ChromeLanguageStore, resolveLocale, t, type LanguagePreference, type LanguageStore, type Locale } from "../shared/i18n";
@@ -132,7 +132,7 @@ export function createQueueController({ root, messageClient, download = download
       ? matching.sort((left, right) =>
         (right.completedAt ?? "").localeCompare(left.completedAt ?? "") ||
         right.capture.capturedAt.localeCompare(left.capture.capturedAt))
-      : matching;
+      : matching.sort((left, right) => right.capture.capturedAt.localeCompare(left.capture.capturedAt));
   };
   const recordFor = (id: string) => records.find((record) => record.id === id);
 
@@ -659,7 +659,7 @@ export function createQueueController({ root, messageClient, download = download
     async exportOne(id) {
       const record = recordFor(id);
       if (!record) return;
-      await finishExport([record], recordToMarkdown(record, locale), `ocf-capture-${record.id}.md`, "text/markdown");
+      await finishExport([record], recordToMarkdown(record, locale), markdownFilename(record.source.title), "text/markdown");
     },
 
     async exportSelected() {

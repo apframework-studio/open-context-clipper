@@ -4,17 +4,17 @@ Language: **English** · [简体中文](README.zh-CN.md)
 
 **Bring web articles into your own local knowledge base.**
 
-Open Context Clipper is an open source Chrome extension for capturing the article you are reading. Preview the extracted text, decide whether to save it, then export clean Markdown for your notes, files, or other local knowledge tools. Extraction and queue storage happen on your device. No account or server is required.
+Open Context Clipper is an open source Chrome extension for capturing the article you are reading. Preview the extracted text, then download Markdown immediately or save the article to a local queue for later. Use the files in your notes or other local knowledge tools. Extraction and queue storage happen on your device. No account or server is required.
 
 ## From the web to local Markdown
 
 | 1. Capture deliberately | 2. Manage locally | 3. Export freely |
 | --- | --- | --- |
-| Preview the title, source, and extracted text. Nothing is saved until you confirm. | Search your local queue, inspect articles, add notes, and select multiple captures. | Download Markdown, bundle articles into a ZIP, or export selected records as JSON. |
+| Preview the title, source, and extracted text. Download Markdown directly or save to the queue. | Search your local queue, inspect articles, add notes, and select multiple captures. | Download Markdown, bundle articles into a ZIP, or export selected records as JSON. |
 
 ### Preview before saving
 
-Click the extension on an article page to inspect the extracted content and any warnings. Choose **Save to queue** only when the preview looks right. Closing the popup saves nothing.
+Click the extension on an article page to inspect the extracted content and any warnings. Choose **Export Markdown** to download the current article without adding it to the queue, or **Save to queue** to keep it for later. An optional note is included in a direct export. Closing the popup saves nothing.
 
 <p align="center">
   <img src="docs/images/capture-preview.png" alt="Capture preview before saving an article to the queue" width="300">
@@ -22,13 +22,13 @@ Click the extension on an article page to inspect the extracted content and any 
 
 ### Manage articles in a full browser tab
 
-Choose **Open queue** to search your captures, inspect details, reopen a source, or export on demand. Articles waiting for export stay in **Inbox**. Once a download starts, they move to **Completed**, where you can find and export them again. Select several articles or export the current search results as a ZIP.
+Choose **Open queue** to search your captures, inspect details, reopen a source, or export on demand. Articles waiting for export stay in **Inbox**, with the newest captures first. Once a download starts, they move to **Completed**, where you can find and export them again. Select several articles or export the current search results as a ZIP.
 
 ![Full-page local queue for searching, reviewing, and exporting articles](docs/images/local-queue.png)
 
 ### Read and organize with your own tools
 
-Exported Markdown includes the article title, source URL, capture time, author and note when present, and extracted body. Open it in Typora or another Markdown editor, or add it to your local knowledge base for further organization and backup.
+Exported Markdown includes the article title, source URL, capture time, author and note when present, and extracted body. Markdown files use the page title as their filename where possible; unsupported filename characters are replaced, and same-title articles in a ZIP get a number suffix. Open the files in Typora or another Markdown editor, or add them to your local knowledge base for further organization and backup.
 
 ![An exported Markdown article opened in Typora](docs/images/markdown-in-typora.png)
 
@@ -47,8 +47,8 @@ Open `chrome://extensions`, turn on **Developer mode**, choose **Load unpacked**
 
 1. Open a fully loaded article and click Open Context Clipper in the Chrome toolbar.
 2. Check the title, source, author, publication date, text length, remote image count, and excerpt. Add an optional note.
-3. Click **Save to queue**. If the same page and content were already captured, the extension tells you instead of silently creating another copy.
-4. In **Inbox**, export one article as Markdown, selected articles as ZIP or JSON, or all current search results as ZIP.
+3. Click **Export Markdown** for an immediate download that does not create a queue record, or **Save to queue** to keep the article. If the same page and content were already queued, the extension tells you instead of silently creating another copy.
+4. In **Inbox**, find newer captures at the top. Export one article as Markdown, selected articles as ZIP or JSON, or all current search results as ZIP.
 5. A ZIP contains each article in `articles/` and the corresponding records in `captures.json`. Move the Markdown files into your own folders or knowledge base.
 
 Chrome internal pages such as `chrome://` cannot be captured. The popup still lets you open the queue. On sign-in or paywalled pages, the extension works only with content already rendered in your current tab; review the preview before saving.
@@ -66,7 +66,7 @@ Completed captures are kept locally forever by default. In **Queue → Settings*
 ## Privacy and control
 
 - The extension reads only the already rendered content of the current tab when you click it. It does not poll pages in the background or bypass sign-in and paywalls.
-- Captures stay in the extension's local IndexedDB queue. They are not uploaded to Open Context Forge or a project server.
+- Captures saved to the queue stay in the extension's local IndexedDB. Direct Markdown exports do not create queue records. Article content is not uploaded to Open Context Forge or a project server.
 - Downloads start only when you choose an export. The extension cannot confirm that the file was ultimately saved, so check important exports before enabling automatic cleanup.
 - It does not read or save cookies, credentials, or browsing history. Markdown keeps links to remote images instead of downloading the image files.
 
