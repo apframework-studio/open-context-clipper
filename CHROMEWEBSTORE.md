@@ -35,7 +35,7 @@ This is copy for the Chrome Web Store Developer Dashboard. The store's default l
 
 **Privacy policy URL:** https://github.com/apframework-studio/open-context-clipper/blob/main/PRIVACY.md
 
-These URLs require the new policy to be committed and pushed to the public repository before submission.
+The privacy policy is published in the public repository and can be opened without signing in.
 
 **Store assets:** use `icons/icon-128.png` from the release package, [English preview screenshot](docs/webstore/preview-en-1280x800.png), [English queue screenshot](docs/webstore/queue-en-1280x800.png), and [440×280 promotional tile](docs/webstore/promo-tile.png). The two screenshots use [original fictional demo content](docs/webstore/sample-content.md), so they contain no captured third-party article or private queue data.
 
@@ -64,7 +64,7 @@ No account or credentials are required. Open a public article page with visible 
 - [ ] Export existing local queue records that must survive installing a potentially different Chrome Web Store extension ID.
 - [x] Use the current 128×128 PNG icon and two 1280×800 screenshots rendered from the current extension UI with original demo content. A 440×280 promotional tile is also ready.
 - [x] Create a ZIP containing the contents of `dist/`, with `manifest.json` at the archive root. The validated archive is `release/open-context-clipper-0.1.0-chrome-web-store.zip` (ignored by Git); source maps and `.DS_Store` files are excluded.
-- [ ] Confirm the public privacy policy URL is reachable without signing in.
+- [x] Confirm the public privacy policy URL is reachable without signing in (HTTP 200).
 - [ ] Fill the English listing, privacy practices, distribution, and reviewer instructions in the Developer Dashboard; review the exact submitted fields before submission.
 - [ ] Submit for review with deferred publishing if approval should not immediately make the extension public.
 
