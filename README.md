@@ -17,20 +17,20 @@ Open Context Clipper is an open source Chrome extension for capturing the articl
 Click the extension on an article page to inspect the extracted content and any warnings. Choose **Export Markdown** to download the current article without adding it to the queue, or **Save to queue** to keep it for later. An optional note is included in a direct export. Closing the popup saves nothing.
 
 <p align="center">
-  <img src="docs/images/capture-preview.png" alt="Capture preview before saving an article to the queue" width="300">
+  <img src="docs/webstore/preview-en-1280x800.png" alt="English capture preview using an original sample article" width="640">
 </p>
 
 ### Manage articles in a full browser tab
 
 Choose **Open queue** to search your captures, inspect details, reopen a source, or export on demand. Articles waiting for export stay in **Inbox**, with the newest captures first. Once a download starts, they move to **Completed**, where you can find and export them again. Select several articles or export the current search results as a ZIP.
 
-![Full-page local queue for searching, reviewing, and exporting articles](docs/images/local-queue.png)
+![English local queue using original sample articles](docs/webstore/queue-en-1280x800.png)
+
+The screenshots use [original fictional sample content](docs/webstore/sample-content.md); no private queue records are shown.
 
 ### Read and organize with your own tools
 
 Exported Markdown includes the article title, source URL, capture time, author and note when present, and extracted body. Markdown files use the page title as their filename where possible; unsupported filename characters are replaced, and same-title articles in a ZIP get a number suffix. Open the files in Typora or another Markdown editor, or add them to your local knowledge base for further organization and backup.
-
-![An exported Markdown article opened in Typora](docs/images/markdown-in-typora.png)
 
 ## Install from source
 
@@ -64,6 +64,8 @@ Fixed metadata labels in exported Markdown follow the interface language. Articl
 Completed captures are kept locally forever by default. In **Queue → Settings**, you can choose to keep them for 30 or 90 days. Cleanup runs only the next time you open the queue; Inbox captures are never automatically deleted. Re-exporting starts a new retention period from the latest export. Deleted captures cannot be restored in the extension, so check important downloads before enabling cleanup.
 
 ## Privacy and control
+
+See the [Privacy Policy](PRIVACY.md) for the full data-handling and retention details.
 
 - The extension reads only the already rendered content of the current tab when you click it. It does not poll pages in the background or bypass sign-in and paywalls.
 - Captures saved to the queue stay in the extension's local IndexedDB. Direct Markdown exports do not create queue records. Article content is not uploaded to Open Context Forge or a project server.

@@ -28,9 +28,9 @@ describe("extension build", () => {
     expect(manifest.default_locale).toBe("en");
     expect(manifest.description).toBe("__MSG_extensionDescription__");
     for (const [locale, description] of [
-      ["en", "Capture web articles into a local Markdown queue."],
-      ["zh_CN", "本地离线采集当前网页正文。"],
-      ["zh_TW", "本地离线采集当前网页正文。"],
+      ["en", "Clip web articles to local Markdown. Preview, save to a private queue, or export individual and batch files."],
+      ["zh_CN", "预览网页文章，直接导出 Markdown，或保存到本地队列批量整理。"],
+      ["zh_TW", "預覽網頁文章，直接匯出 Markdown，或儲存到本機佇列批次整理。"],
     ]) {
       const catalog = JSON.parse(readFileSync(resolve(dist, "_locales", locale, "messages.json"), "utf8"));
       expect(catalog.extensionDescription.message).toBe(description);

@@ -1,4 +1,4 @@
 {
-  "extensionDescription": { "message": "本地离线采集当前网页正文。" },
+  "extensionDescription": { "message": "預覽網頁文章，直接匯出 Markdown，或儲存到本機佇列批次整理。" },
   "captureCurrentArticle": { "message": "采集当前文章" }
 }

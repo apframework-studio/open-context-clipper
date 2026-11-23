@@ -1,4 +1,4 @@
 {
-  "extensionDescription": { "message": "Capture web articles into a local Markdown queue." },
+  "extensionDescription": { "message": "Clip web articles to local Markdown. Preview, save to a private queue, or export individual and batch files." },
   "captureCurrentArticle": { "message": "Capture this article" }
 }
